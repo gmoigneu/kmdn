@@ -117,6 +117,7 @@ fn emit(app: &AppHandle, env: &AgentEnvelope) {
 }
 
 impl Runtime {
+    #[allow(clippy::too_many_arguments)]
     pub async fn start(
         &self,
         app: AppHandle,
