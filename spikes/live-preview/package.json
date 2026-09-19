@@ -16,7 +16,8 @@
     "@codemirror/state": "^6",
     "@codemirror/view": "^6",
     "@lezer/highlight": "^1",
-    "@lezer/markdown": "^1"
+    "@lezer/markdown": "^1",
+    "@lezer/common": "^1"
   },
   "devDependencies": {
     "jsdom": "^25",

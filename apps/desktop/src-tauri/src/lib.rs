@@ -1,6 +1,8 @@
 //! Tauri shell. Commands are thin wrappers over kmdn-core (D59). Network and git work runs
 //! on blocking threads so the UI never waits.
 
+mod agents;
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -29,6 +31,7 @@ const GITHUB_CLIENT_ID: Option<&str> = option_env!("KMDN_GITHUB_CLIENT_ID");
 pub struct AppState {
     secrets: Arc<FileStore>,
     data_dir: PathBuf,
+    agents: Arc<agents::Runtime>,
 }
 
 #[derive(Serialize)]
@@ -348,8 +351,17 @@ async fn submit_thread(
 ) -> Result<SubmitOutcome, String> {
     let secrets = state.secrets.clone();
     let data_dir = state.data_dir.clone();
+    let agents_rt = state.agents.clone();
+    let agent_log = state
+        .agents
+        .condensed_log(&slug)
+        .filter(|l| !l.trim().is_empty());
     blocking(move || {
-        let st = AppState { secrets, data_dir };
+        let st = AppState {
+            secrets,
+            data_dir,
+            agents: agents_rt,
+        };
         let repo = Repo::open(&root).map_err(err)?;
         let wt = worktree_for(&repo, &slug)?;
         let remote = repo.remote_info("origin").map_err(err)?;
@@ -358,7 +370,7 @@ async fn submit_thread(
         let draft = Draft {
             title,
             summary,
-            agent_log: None,
+            agent_log,
         };
         let labels = vec!["kmdn".to_string()];
         match submit::submit(
@@ -562,6 +574,71 @@ async fn review_merge(
     .await
 }
 
+// ---------- agents
+
+#[tauri::command]
+async fn agent_detect() -> Vec<agents::DetectedAgent> {
+    agents::detect().await
+}
+
+#[tauri::command]
+async fn agent_start(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    root: String,
+    slug: String,
+    kind: kmdn_core::agents::AgentKind,
+    mode: kmdn_core::agents::Mode,
+    resume: Option<String>,
+) -> Result<agents::SessionInfo, String> {
+    let repo = Repo::open(&root).map_err(err)?;
+    let wt = worktree_for(&repo, &slug)?;
+    state
+        .agents
+        .start(app, &state.data_dir, &slug, &wt.path, kind, mode, resume)
+        .await
+}
+
+#[tauri::command]
+async fn agent_send(state: State<'_, AppState>, slug: String, text: String) -> Result<(), String> {
+    state.agents.send(&slug, &text).await
+}
+
+#[tauri::command]
+async fn agent_reply_permission(
+    state: State<'_, AppState>,
+    slug: String,
+    id: String,
+    allow: bool,
+    reason: Option<String>,
+) -> Result<(), String> {
+    state
+        .agents
+        .reply_permission(
+            &slug,
+            &id,
+            allow,
+            reason.as_deref().unwrap_or("denied by user"),
+        )
+        .await
+}
+
+#[tauri::command]
+async fn agent_cancel(state: State<'_, AppState>, slug: String) -> Result<(), String> {
+    state.agents.cancel(&slug).await
+}
+
+#[tauri::command]
+async fn agent_stop(state: State<'_, AppState>, slug: String) -> Result<(), String> {
+    state.agents.stop(&slug).await;
+    Ok(())
+}
+
+#[tauri::command]
+fn agent_session(state: State<AppState>, slug: String) -> Option<agents::SessionInfo> {
+    state.agents.info(&slug)
+}
+
 // ---------- auth
 
 #[tauri::command]
@@ -732,6 +809,7 @@ pub fn run() {
             app.manage(AppState {
                 secrets: Arc::new(FileStore::new(dir.join("secrets.json"))),
                 data_dir: dir,
+                agents: Arc::new(agents::Runtime::default()),
             });
             Ok(())
         })
@@ -756,6 +834,13 @@ pub fn run() {
             review_comment,
             review_submit,
             review_merge,
+            agent_detect,
+            agent_start,
+            agent_send,
+            agent_reply_permission,
+            agent_cancel,
+            agent_stop,
+            agent_session,
             auth_status,
             auth_start_device_flow,
             auth_poll_device_flow,

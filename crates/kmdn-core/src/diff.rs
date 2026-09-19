@@ -115,7 +115,6 @@ pub fn thread_changes(worktree: &Path, base_ref: &str) -> Result<Vec<FileChange>
     Ok(out)
 }
 
-
 /// Changes between two commits, e.g. a PR's merge base and head, for the review layout (D48).
 pub fn changes_between(
     repo: &Repository,

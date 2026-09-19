@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { RenderedDiff } from "@/components/RenderedDiff";
 import { RenderedMarkdown } from "@/components/RenderedMarkdown";
 import { MarkdownEditor } from "@/components/MarkdownEditor";
+import { AgentPanel } from "@/components/AgentPanel";
 
 type Tab = "changes" | "editor" | "read";
 
@@ -109,14 +110,8 @@ export function ThreadView({ slug }: { slug: string }) {
       )}
 
       <div className="flex-1 flex min-h-0">
-        <section className="w-[38%] min-w-[300px] border-r border-border flex flex-col">
-          <div className="flex-1 overflow-y-auto p-4 text-xs text-fg-muted space-y-2">
-            <p>Timeline. Agent turns and saves show up here (#24).</p>
-            <p className="font-mono text-[10px] break-all opacity-70">{t.branch}</p>
-          </div>
-          <div className="border-t border-border p-2">
-            <textarea rows={2} placeholder="Ask an agent or leave a note… (#40)" className="w-full resize-none rounded-md border border-border bg-bg p-2 text-sm outline-none" />
-          </div>
+        <section className="w-[38%] min-w-[320px] border-r border-border flex flex-col">
+          <AgentPanel root={root} slug={slug} branch={t.branch} onChanged={() => { qc.invalidateQueries({ queryKey: ["changes", root, slug] }); qc.invalidateQueries({ queryKey: ["wt-docs", t.path] }); qc.invalidateQueries({ queryKey: ["wt-file", t.path] }); }} />
         </section>
         <section className="flex-1 flex flex-col min-w-0">
           <div className="h-9 border-b border-border flex items-center px-2 gap-1 text-xs">

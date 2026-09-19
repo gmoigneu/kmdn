@@ -55,6 +55,22 @@ export interface ReviewDetail { pull: PullRequest; changes: FileChange[]; commen
 export type ReviewEvent = "approve" | "request_changes" | "comment";
 export type MergeMethod = "merge" | "squash" | "rebase";
 
+export type AgentKind = "claude" | "codex" | "pi";
+export type AgentMode = "suggest" | "edit" | "developer";
+export type ToolKind = "read" | "write" | "shell" | { other: string };
+export type AgentEvent =
+  | { type: "session_started"; session_id: string }
+  | { type: "text_delta"; text: string }
+  | { type: "text"; text: string }
+  | { type: "tool_call_started"; id: string; kind: ToolKind; paths: string[]; command: string | null }
+  | { type: "tool_call_finished"; id: string; ok: boolean; summary: string }
+  | { type: "permission_request"; id: string; kind: ToolKind; paths: string[]; command: string | null }
+  | { type: "turn_done" }
+  | { type: "error"; message: string };
+export interface AgentEnvelope { slug: string; kind: AgentKind; event: AgentEvent }
+export interface DetectedAgent { kind: AgentKind; available: boolean; version: string | null; path: string | null }
+export interface SessionInfo { slug: string; kind: AgentKind; mode: AgentMode; session_id: string | null; running: boolean }
+
 export type Status = "draft" | "review" | "published" | "deprecated";
 
 export interface Document {
@@ -148,4 +164,13 @@ export const api = {
   authSignOut: (host: string) => invoke<void>("auth_sign_out", { host }),
   listRemoteRepos: (host: string) => invoke<RepoSummary[]>("list_remote_repos", { host }),
   defaultCloneDir: (name: string) => invoke<string>("default_clone_dir", { name }),
+  agentDetect: () => invoke<DetectedAgent[]>("agent_detect"),
+  agentStart: (root: string, slug: string, kind: AgentKind, mode: AgentMode, resume: string | null = null) =>
+    invoke<SessionInfo>("agent_start", { root, slug, kind, mode, resume }),
+  agentSend: (slug: string, text: string) => invoke<void>("agent_send", { slug, text }),
+  agentReplyPermission: (slug: string, id: string, allow: boolean, reason: string | null = null) =>
+    invoke<void>("agent_reply_permission", { slug, id, allow, reason }),
+  agentCancel: (slug: string) => invoke<void>("agent_cancel", { slug }),
+  agentStop: (slug: string) => invoke<void>("agent_stop", { slug }),
+  agentSession: (slug: string) => invoke<SessionInfo | null>("agent_session", { slug }),
 };
