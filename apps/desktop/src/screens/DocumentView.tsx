@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useUi } from "@/lib/store";
+import { RenderedMarkdown } from "@/components/RenderedMarkdown";
 
 export function DocumentView({ path }: { path: string }) {
   const { kb } = useUi();
@@ -13,7 +14,7 @@ export function DocumentView({ path }: { path: string }) {
         <button disabled className="ml-auto h-7 px-3 rounded-md border border-border text-xs disabled:opacity-40" title="Edit lands in #30">Edit</button>
       </header>
       <div className="flex-1 overflow-y-auto p-8">
-        <pre className="prose-pane whitespace-pre-wrap font-mono text-[13px]">{q.data}</pre>
+        {q.data != null && <RenderedMarkdown text={q.data} />}
       </div>
     </div>
   );

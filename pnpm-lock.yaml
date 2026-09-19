@@ -10,6 +10,27 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@codemirror/commands':
+        specifier: ^6
+        version: 6.11.1
+      '@codemirror/lang-markdown':
+        specifier: ^6
+        version: 6.5.2
+      '@codemirror/language':
+        specifier: ^6
+        version: 6.12.4
+      '@codemirror/language-data':
+        specifier: ^6
+        version: 6.5.2
+      '@codemirror/state':
+        specifier: ^6
+        version: 6.7.5
+      '@codemirror/view':
+        specifier: ^6
+        version: 6.43.12
+      '@lezer/common':
+        specifier: ^1
+        version: 1.5.2
       '@radix-ui/react-dialog':
         specifier: ^1
         version: 1.1.23(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)

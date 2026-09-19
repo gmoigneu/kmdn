@@ -28,7 +28,14 @@
     "@radix-ui/react-slot": "^1",
     "class-variance-authority": "^0.7",
     "@tauri-apps/plugin-dialog": "^2",
-    "marked": "^15"
+    "marked": "^15",
+    "@codemirror/commands": "^6",
+    "@codemirror/lang-markdown": "^6",
+    "@codemirror/language": "^6",
+    "@codemirror/language-data": "^6",
+    "@codemirror/state": "^6",
+    "@codemirror/view": "^6",
+    "@lezer/common": "^1"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",

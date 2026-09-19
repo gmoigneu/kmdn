@@ -5,6 +5,8 @@ import { api, type FileChange } from "@/lib/api";
 import { useUi } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { RenderedDiff } from "@/components/RenderedDiff";
+import { RenderedMarkdown } from "@/components/RenderedMarkdown";
+import { MarkdownEditor } from "@/components/MarkdownEditor";
 
 type Tab = "changes" | "editor" | "read";
 
@@ -112,25 +114,25 @@ export function ThreadView({ slug }: { slug: string }) {
               openPath ? (
                 <div className="h-full flex flex-col">
                   <div className="px-3 h-7 flex items-center text-[11px] font-mono text-fg-muted border-b border-border">{openPath}{dirty && " •"}</div>
-                  <textarea
+                  <MarkdownEditor
+                    key={openPath}
                     value={buffer}
-                    onChange={(e) => { setBuffer(e.target.value); setDirty(true); }}
-                    onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "s") { e.preventDefault(); if (dirty) save.mutate(); } }}
-                    spellCheck
-                    className="flex-1 w-full resize-none bg-transparent p-6 font-mono text-[13px] leading-relaxed outline-none prose-pane"
+                    onChange={(next) => { setBuffer(next); setDirty(true); }}
+                    onSave={() => { if (dirty) save.mutate(); }}
+                    className="flex-1 min-h-0 overflow-hidden"
                   />
                   {save.error && <p className="px-3 py-1 text-danger text-xs">{String(save.error)}</p>}
                 </div>
               ) : (
                 <ul className="p-4 text-xs space-y-1">
-                  <li className="text-fg-muted mb-2">Open a document. Live preview replaces this textarea in #25.</li>
+                  <li className="text-fg-muted mb-2">Open a document to edit it.</li>
                   {docs.data?.map((d) => <li key={d.path}><button className="font-mono hover:underline" onClick={() => openInEditor(d.path)}>{d.path}</button></li>)}
                 </ul>
               )
             )}
             {tab === "read" && (
               <div className="p-8 prose-pane">
-                {openPath && file.data != null ? <pre className="whitespace-pre-wrap font-mono text-[13px]">{file.data}</pre> : <p className="text-fg-muted text-xs">Pick a document in the Editor tab. Rendered read view lands in #30.</p>}
+                {openPath && file.data != null ? <RenderedMarkdown text={buffer || file.data} /> : <p className="text-fg-muted text-xs">Pick a document in the Editor tab.</p>}
               </div>
             )}
           </div>
