@@ -12,7 +12,8 @@ use kmdn_core::local_changes::{self, LocalChanges};
 use kmdn_core::provider::github::{self, GitHub};
 use kmdn_core::provider::gitlab::GitLab;
 use kmdn_core::provider::{
-    self, DeviceCode, DevicePoll, Provider, PullRequest, RepoRef, RepoSummary, User,
+    self, Comment, DeviceCode, DevicePoll, MergeMethod, Mergeability, Provider, PullRequest,
+    RepoRef, RepoSummary, ReviewEvent, Side, User,
 };
 use kmdn_core::repo::{ProviderKind, RemoteInfo, Repo};
 use kmdn_core::secrets::{FileStore, SecretStore, StoredToken};
@@ -450,6 +451,117 @@ async fn list_reviews(
     .await
 }
 
+#[derive(Serialize)]
+pub struct ReviewDetail {
+    pub pull: PullRequest,
+    pub changes: Vec<FileChange>,
+    pub comments: Vec<Comment>,
+    pub mergeability: Mergeability,
+    pub head_sha: String,
+}
+
+/// Everything the review layout needs (D48): PR, rendered-diff inputs, comments, mergeability.
+#[tauri::command]
+async fn review_detail(
+    state: State<'_, AppState>,
+    root: String,
+    number: u64,
+) -> Result<ReviewDetail, String> {
+    let secrets = state.secrets.clone();
+    blocking(move || {
+        let repo = Repo::open(&root).map_err(err)?;
+        let remote = repo.remote_info("origin").map_err(err)?;
+        let (provider, token, repo_ref) = provider_for(&secrets, &remote)?;
+        let pull = provider.get_pull(&repo_ref, number).map_err(err)?;
+        let head = kmdn_core::diff::fetch_branch(repo.git(), &pull.head_branch, Some(&token))
+            .map_err(err)?;
+        let base = kmdn_core::diff::fetch_branch(repo.git(), &pull.base_branch, Some(&token))
+            .map_err(err)?;
+        let changes = kmdn_core::diff::changes_between(repo.git(), base, head).map_err(err)?;
+        let comments = provider.list_comments(&repo_ref, number).map_err(err)?;
+        let mergeability = provider.mergeability(&repo_ref, number).map_err(err)?;
+        Ok(ReviewDetail {
+            pull,
+            changes,
+            comments,
+            mergeability,
+            head_sha: head.to_string(),
+        })
+    })
+    .await
+}
+
+#[tauri::command]
+async fn review_comment(
+    state: State<'_, AppState>,
+    root: String,
+    number: u64,
+    body: String,
+    path: Option<String>,
+    line: Option<u32>,
+    side: Option<Side>,
+) -> Result<Comment, String> {
+    let secrets = state.secrets.clone();
+    blocking(move || {
+        let repo = Repo::open(&root).map_err(err)?;
+        let remote = repo.remote_info("origin").map_err(err)?;
+        let (provider, _, repo_ref) = provider_for(&secrets, &remote)?;
+        match (path, line) {
+            (Some(p), Some(l)) => provider
+                .create_review_comment(&repo_ref, number, &body, &p, l, side.unwrap_or(Side::Right))
+                .map_err(err),
+            _ => provider
+                .create_comment(&repo_ref, number, &body)
+                .map_err(err),
+        }
+    })
+    .await
+}
+
+#[tauri::command]
+async fn review_submit(
+    state: State<'_, AppState>,
+    root: String,
+    number: u64,
+    event: ReviewEvent,
+    body: String,
+) -> Result<(), String> {
+    let secrets = state.secrets.clone();
+    blocking(move || {
+        let repo = Repo::open(&root).map_err(err)?;
+        let remote = repo.remote_info("origin").map_err(err)?;
+        let (provider, _, repo_ref) = provider_for(&secrets, &remote)?;
+        provider
+            .submit_review(&repo_ref, number, event, &body)
+            .map_err(err)
+    })
+    .await
+}
+
+/// Merge (Publish). The provider enforces its own rules (D57); kmdn adds none.
+#[tauri::command]
+async fn review_merge(
+    state: State<'_, AppState>,
+    root: String,
+    number: u64,
+    method: Option<MergeMethod>,
+) -> Result<(), String> {
+    let secrets = state.secrets.clone();
+    blocking(move || {
+        let repo = Repo::open(&root).map_err(err)?;
+        let remote = repo.remote_info("origin").map_err(err)?;
+        let (provider, token, repo_ref) = provider_for(&secrets, &remote)?;
+        provider
+            .merge_pull(&repo_ref, number, method.unwrap_or(MergeMethod::Squash))
+            .map_err(err)?;
+        // Bring main forward right away so the merged document shows up.
+        sync::fetch(repo.git(), "origin", Some(&token)).map_err(err)?;
+        let _ = sync::fast_forward_default(&repo);
+        Ok(())
+    })
+    .await
+}
+
 // ---------- auth
 
 #[tauri::command]
@@ -640,6 +752,10 @@ pub fn run() {
             local_changes,
             move_local_changes_to_thread,
             list_reviews,
+            review_detail,
+            review_comment,
+            review_submit,
+            review_merge,
             auth_status,
             auth_start_device_flow,
             auth_poll_device_flow,

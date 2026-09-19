@@ -71,8 +71,8 @@ export function Sidebar() {
       <aside className="w-11 border-r border-border bg-bg-muted flex flex-col items-center py-2 gap-3">
         <button title="Expand sidebar" onClick={toggleSidebar} className="p-1.5 rounded-md hover:bg-bg-elevated"><PanelLeft size={16} /></button>
         <button title="Home" onClick={() => go({ kind: "home" })} className="p-1.5 rounded-md hover:bg-bg-elevated"><Layers size={16} /></button>
-        <button title="Reviews" className="p-1.5 rounded-md hover:bg-bg-elevated"><GitPullRequest size={16} /></button>
-        <button title="Documents" className="p-1.5 rounded-md hover:bg-bg-elevated"><FileText size={16} /></button>
+        <button title="Reviews" onClick={() => { toggleSidebar(); }} className="p-1.5 rounded-md hover:bg-bg-elevated"><GitPullRequest size={16} /></button>
+        <button title="Documents" onClick={() => { toggleSidebar(); }} className="p-1.5 rounded-md hover:bg-bg-elevated"><FileText size={16} /></button>
       </aside>
     );
   }
@@ -112,9 +112,11 @@ export function Sidebar() {
             <button key={t.slug} onClick={() => go({ kind: "thread", slug: t.slug })}
               className={cn("w-full text-left px-2 py-1 rounded-md truncate hover:bg-bg-elevated flex items-center gap-2",
                 view.kind === "thread" && view.slug === t.slug && "bg-bg-elevated")}>
-              <span className="size-1.5 rounded-full bg-fg-muted" />
-              <span className="truncate">{t.slug}</span>
-              <span className="ml-auto text-[10px] px-1.5 rounded-full border border-border text-fg-muted">draft</span>
+              <span className={cn("size-1.5 rounded-full", reviews.data?.some((p) => p.head_branch === t.branch) ? "bg-accent" : "bg-fg-muted")} />
+              <span className="truncate">{reviews.data?.find((p) => p.head_branch === t.branch)?.title ?? t.slug}</span>
+              <span className={cn("ml-auto text-[10px] px-1.5 rounded-full border", reviews.data?.some((p) => p.head_branch === t.branch) ? "border-accent text-accent" : "border-border text-fg-muted")}>
+                {reviews.data?.some((p) => p.head_branch === t.branch) ? "in review" : "draft"}
+              </span>
             </button>
           )) : !hasLocal && <div className="px-2 text-xs text-fg-muted">No threads yet.</div>}
         </Section>

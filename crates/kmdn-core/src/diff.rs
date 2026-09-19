@@ -161,3 +161,93 @@ mod tests {
         assert!(!ch.iter().any(|c| c.path == "elsewhere.md"));
     }
 }
+
+/// Changes between two commits, e.g. a PR's merge base and head, for the review layout (D48).
+pub fn changes_between(
+    repo: &Repository,
+    base_oid: git2::Oid,
+    head_oid: git2::Oid,
+) -> Result<Vec<FileChange>, RepoError> {
+    let base_commit = repo.find_commit(base_oid)?;
+    let head_commit = repo.find_commit(head_oid)?;
+    let merge_base = repo.merge_base(base_oid, head_oid).unwrap_or(base_oid);
+    let base_tree = repo.find_commit(merge_base)?.tree()?;
+    let head_tree = head_commit.tree()?;
+    let _ = base_commit;
+    let mut diff = repo.diff_tree_to_tree(Some(&base_tree), Some(&head_tree), None)?;
+    let mut find = git2::DiffFindOptions::new();
+    find.renames(true);
+    diff.find_similar(Some(&mut find))?;
+    let blob_text = |tree: &git2::Tree, p: Option<&Path>| -> Option<String> {
+        let p = p?;
+        let e = tree.get_path(p).ok()?;
+        let b = repo.find_blob(e.id()).ok()?;
+        text_of(b.content())
+    };
+    let mut out = Vec::new();
+    for delta in diff.deltas() {
+        let status = match delta.status() {
+            git2::Delta::Added => ChangeStatus::Added,
+            git2::Delta::Deleted => ChangeStatus::Deleted,
+            git2::Delta::Renamed => ChangeStatus::Renamed,
+            git2::Delta::Modified | git2::Delta::Typechange => ChangeStatus::Modified,
+            _ => continue,
+        };
+        let new_path = delta
+            .new_file()
+            .path()
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+        let old_path = delta
+            .old_file()
+            .path()
+            .map(|p| p.to_string_lossy().replace('\\', "/"));
+        let old = if status == ChangeStatus::Added {
+            None
+        } else {
+            blob_text(&base_tree, delta.old_file().path())
+        };
+        let new = if status == ChangeStatus::Deleted {
+            None
+        } else {
+            blob_text(&head_tree, delta.new_file().path())
+        };
+        let binary = delta.flags().is_binary()
+            || (old.is_none() && status != ChangeStatus::Added)
+            || (new.is_none() && status != ChangeStatus::Deleted);
+        out.push(FileChange {
+            path: if status == ChangeStatus::Deleted {
+                old_path.clone().unwrap_or(new_path.clone())
+            } else {
+                new_path
+            },
+            old_path: if status == ChangeStatus::Renamed {
+                old_path
+            } else {
+                None
+            },
+            status,
+            old,
+            new,
+            binary,
+        });
+    }
+    out.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(out)
+}
+
+/// Fetches a PR head branch into `refs/remotes/origin/<branch>` and returns its oid.
+pub fn fetch_branch(
+    repo: &Repository,
+    branch: &str,
+    token: Option<&crate::sync::Token>,
+) -> Result<git2::Oid, RepoError> {
+    let mut r = repo.find_remote("origin")?;
+    let mut fo = git2::FetchOptions::new();
+    fo.remote_callbacks(crate::sync::callbacks(token));
+    let spec = format!("+refs/heads/{branch}:refs/remotes/origin/{branch}");
+    r.fetch(&[spec.as_str()], Some(&mut fo), None)?;
+    repo.find_reference(&format!("refs/remotes/origin/{branch}"))?
+        .target()
+        .ok_or_else(|| git2::Error::from_str("branch has no target").into())
+}

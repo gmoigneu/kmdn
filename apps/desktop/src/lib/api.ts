@@ -50,6 +50,10 @@ export interface PullRequest {
 export interface Comment { id: number; author: string; body: string; created_at: string; url: string; path: string | null; line: number | null; side: "left" | "right" | null }
 export interface Submission { pull: PullRequest; created: boolean; pushed_head: string; log_comment: Comment | null }
 export interface SubmitOutcome { submission: Submission | null; findings: Finding[]; error: string | null }
+export interface Mergeability { mergeable: boolean | null; state: string; approvals: number; changes_requested: boolean; checks_passing: boolean | null }
+export interface ReviewDetail { pull: PullRequest; changes: FileChange[]; comments: Comment[]; mergeability: Mergeability; head_sha: string }
+export type ReviewEvent = "approve" | "request_changes" | "comment";
+export type MergeMethod = "merge" | "squash" | "rebase";
 
 export type Status = "draft" | "review" | "published" | "deprecated";
 
@@ -129,6 +133,11 @@ export const api = {
   submitThread: (root: string, slug: string, title: string, summary: string | null) =>
     invoke<SubmitOutcome>("submit_thread", { root, slug, title, summary }),
   listReviews: (root: string) => invoke<PullRequest[]>("list_reviews", { root }),
+  reviewDetail: (root: string, number: number) => invoke<ReviewDetail>("review_detail", { root, number }),
+  reviewComment: (root: string, number: number, body: string, path?: string, line?: number, side?: "left" | "right") =>
+    invoke<Comment>("review_comment", { root, number, body, path: path ?? null, line: line ?? null, side: side ?? null }),
+  reviewSubmit: (root: string, number: number, event: ReviewEvent, body: string) => invoke<void>("review_submit", { root, number, event, body }),
+  reviewMerge: (root: string, number: number, method: MergeMethod = "squash") => invoke<void>("review_merge", { root, number, method }),
   cloneKb: (url: string, dest: string) => invoke<KbInfo>("clone_kb", { url, dest }),
   createKb: (host: string, name: string, description: string, org: string | null, dest: string) =>
     invoke<KbInfo>("create_kb", { host, name, description, org, dest }),

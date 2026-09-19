@@ -1,0 +1,19 @@
+# Golden path against a real GitHub repository (D36, #46). Needs the KMDN_E2E_GITHUB_TOKEN
+# secret: a token with repo scope on the throwaway repository below.
+name: e2e nightly
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+jobs:
+  github:
+    runs-on: ubuntu-latest
+    if: ${{ vars.KMDN_E2E_GITHUB_REPO != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p kmdn-core --test e2e_github -- --ignored --nocapture
+        env:
+          KMDN_E2E_GITHUB_TOKEN: ${{ secrets.KMDN_E2E_GITHUB_TOKEN }}
+          KMDN_E2E_GITHUB_REPO: ${{ vars.KMDN_E2E_GITHUB_REPO }}

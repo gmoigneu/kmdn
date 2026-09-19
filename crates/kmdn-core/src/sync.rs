@@ -34,7 +34,7 @@ impl Token {
     }
 }
 
-fn callbacks(token: Option<&Token>) -> RemoteCallbacks<'_> {
+pub(crate) fn callbacks(token: Option<&Token>) -> RemoteCallbacks<'_> {
     let mut cb = RemoteCallbacks::new();
     if let Some(t) = token {
         let t = t.clone();
