@@ -5,12 +5,14 @@ import { Home } from "./screens/Home";
 import { ThreadView } from "./screens/ThreadView";
 import { DocumentView } from "./screens/DocumentView";
 import { ReviewView } from "./screens/ReviewView";
+import { CommandPalette } from "./components/CommandPalette";
 
 export default function App() {
   const { kb, view } = useUi();
   if (!kb) return <SignIn />;
   return (
     <div className="flex h-full">
+      <CommandPalette />
       <Sidebar />
       <main className="flex-1 min-w-0 flex flex-col">
         {view.kind === "home" && <Home />}

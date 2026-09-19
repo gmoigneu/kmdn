@@ -48,6 +48,8 @@ export interface PullRequest {
   state: PullState; draft: boolean; url: string; updated_at: string; files: string[];
 }
 export interface Comment { id: number; author: string; body: string; created_at: string; url: string; path: string | null; line: number | null; side: "left" | "right" | null }
+export interface Issue { number: number; title: string; body: string; url: string; open: boolean }
+export interface Discussion { issue: Issue | null; comments: Comment[] }
 export interface Submission { pull: PullRequest; created: boolean; pushed_head: string; log_comment: Comment | null }
 export interface SubmitOutcome { submission: Submission | null; findings: Finding[]; error: string | null }
 export interface Mergeability { mergeable: boolean | null; state: string; approvals: number; changes_requested: boolean; checks_passing: boolean | null }
@@ -152,6 +154,8 @@ export const api = {
   submitThread: (root: string, slug: string, title: string, summary: string | null) =>
     invoke<SubmitOutcome>("submit_thread", { root, slug, title, summary }),
   listReviews: (root: string) => invoke<PullRequest[]>("list_reviews", { root }),
+  docDiscussion: (root: string, path: string) => invoke<Discussion>("doc_discussion", { root, path }),
+  docDiscussionComment: (root: string, path: string, body: string) => invoke<Discussion>("doc_discussion_comment", { root, path, body }),
   reviewDetail: (root: string, number: number) => invoke<ReviewDetail>("review_detail", { root, number }),
   reviewComment: (root: string, number: number, body: string, path?: string, line?: number, side?: "left" | "right") =>
     invoke<Comment>("review_comment", { root, number, body, path: path ?? null, line: line ?? null, side: side ?? null }),

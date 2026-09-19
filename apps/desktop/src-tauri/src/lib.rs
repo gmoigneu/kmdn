@@ -485,6 +485,62 @@ fn move_local_changes_to_thread(
     local_changes::move_to_new_thread(&repo, &user, &slug).map_err(err)
 }
 
+// ---------- discussions (D13): one provider issue per document path
+
+#[derive(Serialize)]
+pub struct Discussion {
+    pub issue: Option<provider::Issue>,
+    pub comments: Vec<Comment>,
+}
+
+#[tauri::command]
+async fn doc_discussion(
+    state: State<'_, AppState>,
+    root: String,
+    path: String,
+) -> Result<Discussion, String> {
+    let secrets = state.secrets.clone();
+    blocking(move || {
+        let repo = Repo::open(&root).map_err(err)?;
+        let remote = repo.remote_info("origin").map_err(err)?;
+        let (provider, _, repo_ref) = provider_for(&secrets, &remote)?;
+        let issue = provider.find_issue(&repo_ref, "kmdn", &path).map_err(err)?;
+        let comments = match &issue {
+            Some(i) => provider
+                .list_issue_comments(&repo_ref, i.number)
+                .map_err(err)?,
+            None => vec![],
+        };
+        Ok(Discussion { issue, comments })
+    })
+    .await
+}
+
+#[tauri::command]
+async fn doc_discussion_comment(
+    state: State<'_, AppState>,
+    root: String,
+    path: String,
+    body: String,
+) -> Result<Discussion, String> {
+    let secrets = state.secrets.clone();
+    blocking(move || {
+        let repo = Repo::open(&root).map_err(err)?;
+        let remote = repo.remote_info("origin").map_err(err)?;
+        let (provider, _, repo_ref) = provider_for(&secrets, &remote)?;
+        let issue = match provider.find_issue(&repo_ref, "kmdn", &path).map_err(err)? {
+            Some(i) => i,
+            None => provider
+                .create_issue(&repo_ref, &path, &format!("Discussion about `{path}`, opened from kmdn. Comments here are about the published document, not a pending change."), &["kmdn"])
+                .map_err(err)?,
+        };
+        provider.comment_issue(&repo_ref, issue.number, &body).map_err(err)?;
+        let comments = provider.list_issue_comments(&repo_ref, issue.number).map_err(err)?;
+        Ok(Discussion { issue: Some(issue), comments })
+    })
+    .await
+}
+
 // ---------- reviews
 
 #[tauri::command]
@@ -874,6 +930,8 @@ pub fn run() {
             move_local_changes_to_thread,
             resolve_thread_conflicts,
             thread_conflicts,
+            doc_discussion,
+            doc_discussion_comment,
             list_reviews,
             review_detail,
             review_comment,

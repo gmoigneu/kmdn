@@ -94,9 +94,10 @@ export function Sidebar() {
         <button title="Collapse sidebar" onClick={toggleSidebar} className="p-1 rounded-md hover:bg-bg-elevated text-fg-muted"><PanelLeft size={14} /></button>
       </div>
       <div className="px-3 py-2">
-        <div className="flex items-center gap-2 px-2 h-7 rounded-md border border-border bg-bg text-fg-muted text-xs">
+        <button onClick={() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }))}
+          className="w-full flex items-center gap-2 px-2 h-7 rounded-md border border-border bg-bg text-fg-muted text-xs hover:bg-bg-elevated">
           <Search size={12} /> Search <span className="ml-auto font-mono text-[10px]">⌘K</span>
-        </div>
+        </button>
       </div>
       <div className="flex-1 overflow-y-auto pb-4">
         <Section title="Threads" icon={Layers} count={(threads.data?.length ?? 0) + (hasLocal ? 1 : 0)}>
