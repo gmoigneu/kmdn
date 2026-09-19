@@ -1,0 +1,11 @@
+version: 1
+name: Knowledge base
+description: Describe what this knowledge base covers.
+branch_prefix: kmdn/
+review:
+  labels: [kmdn]
+  post_agent_log: true
+assets:
+  max_bytes: 5242880
+agents:
+  allowed_paths: ["**/*.md", "**/assets/**"]

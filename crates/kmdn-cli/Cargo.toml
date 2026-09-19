@@ -1,0 +1,17 @@
+[package]
+name = "kmdn-cli"
+description = "kmdn command line: check, index, init"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "kmdn-cli"
+path = "src/main.rs"
+
+[dependencies]
+kmdn-core = { path = "../kmdn-core" }
+anyhow.workspace = true
+clap.workspace = true
+serde_json.workspace = true

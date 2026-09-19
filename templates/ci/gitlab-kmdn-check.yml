@@ -1,0 +1,12 @@
+# Optional. Merge into .gitlab-ci.yml in a knowledge base repo (D60).
+kmdn-check:
+  image: debian:stable-slim
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq curl ca-certificates
+    - curl -sSL https://github.com/gmoigneu/kmdn/releases/latest/download/kmdn-cli-x86_64-unknown-linux-gnu.tar.gz | tar xz
+    - mv kmdn-cli /usr/local/bin/
+  script:
+    - kmdn-cli check

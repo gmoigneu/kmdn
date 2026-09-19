@@ -1,0 +1,16 @@
+# Optional. Add to .github/workflows/kmdn-check.yml in a knowledge base repo (D60).
+name: kmdn check
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install kmdn-cli
+        run: |
+          curl -sSL https://github.com/gmoigneu/kmdn/releases/latest/download/kmdn-cli-x86_64-unknown-linux-gnu.tar.gz | tar xz
+          sudo mv kmdn-cli /usr/local/bin/
+      - run: kmdn-cli check
