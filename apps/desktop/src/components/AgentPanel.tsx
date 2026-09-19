@@ -5,6 +5,7 @@ import { listen } from "@tauri-apps/api/event";
 import { ArrowUp, Bot, Check, Loader2, Square, X } from "lucide-react";
 import { api, type AgentEnvelope, type AgentEvent, type AgentKind, type AgentMode, type ToolKind } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { notify } from "@/lib/notify";
 
 type Item =
   | { kind: "user"; text: string }
@@ -71,10 +72,12 @@ export function AgentPanel({ root, slug, branch, onChanged }: { root: string; sl
         }
         case "permission_request":
           next.push({ kind: "permission", id: ev.id, tool: ev.kind, paths: ev.paths, command: ev.command, answered: null });
+          notify("agent_approval", "kmdn: approval needed", `${AGENT_LABEL[kind]} wants to ${toolLabel(ev.kind)} ${ev.command ?? ev.paths.join(", ")}`);
           return next;
         case "turn_done":
           setBusy(false);
           onChanged();
+          notify("agent_done", "kmdn: agent finished", `${AGENT_LABEL[kind]} finished working on ${slug}`);
           if (last?.kind === "assistant") next[next.length - 1] = { ...last, streaming: false };
           return next;
         case "error":

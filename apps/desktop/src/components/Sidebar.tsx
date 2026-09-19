@@ -1,9 +1,10 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FileText, GitPullRequest, HardDrive, Layers, PanelLeft, RefreshCw, Search } from "lucide-react";
 import { api } from "@/lib/api";
 import { useUi } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import { notify } from "@/lib/notify";
 
 function Section({ title, icon: Icon, count, children }: { title: string; icon: typeof Layers; count?: number; children: React.ReactNode }) {
   return (
@@ -64,6 +65,17 @@ export function Sidebar() {
   const docs = useQuery({ queryKey: ["docs", root], queryFn: () => api.listDocuments(root) });
   const local = useQuery({ queryKey: ["local", root], queryFn: () => api.localChanges(root), refetchInterval: 5_000 });
   const reviews = useQuery({ queryKey: ["reviews", root], queryFn: () => api.listReviews(root), enabled: kb!.authenticated, refetchInterval: 60_000, retry: false });
+  const seen = useRef<Set<number> | null>(null);
+  useEffect(() => {
+    if (!reviews.data) return;
+    if (seen.current === null) { seen.current = new Set(reviews.data.map((p) => p.number)); return; }
+    for (const p of reviews.data) {
+      if (!seen.current.has(p.number)) {
+        seen.current.add(p.number);
+        if (p.author !== kb!.user.name) notify("review_requested", "kmdn: new review", `#${p.number} ${p.title} by ${p.author}`);
+      }
+    }
+  }, [reviews.data, kb]);
   const sync = useSyncLoop(root);
   const move = useMutation({
     mutationFn: () => api.moveLocalChangesToThread(root, "local-changes"),
