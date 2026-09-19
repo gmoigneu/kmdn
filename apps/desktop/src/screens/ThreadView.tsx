@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { ExternalLink, FilePlus, Save } from "lucide-react";
+import { ExternalLink, FilePlus, MoreHorizontal, Save, Trash2 } from "lucide-react";
 import { api, type FileChange, type SubmitOutcome } from "@/lib/api";
 import { useUi } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -14,7 +14,7 @@ type Tab = "changes" | "editor" | "read";
 
 const statusLabel: Record<FileChange["status"], string> = { added: "A", modified: "M", deleted: "D", renamed: "R" };
 
-export function ThreadView({ slug }: { slug: string }) {
+export function ThreadView({ slug, initialPath }: { slug: string; initialPath?: string }) {
   const { kb, go } = useUi();
   const root = kb!.root;
   const qc = useQueryClient();
@@ -22,8 +22,9 @@ export function ThreadView({ slug }: { slug: string }) {
   const t = threads.data?.find((x) => x.slug === slug);
   const reviews = useQuery({ queryKey: ["reviews", root], queryFn: () => api.listReviews(root), enabled: kb!.authenticated, retry: false });
   const pr = reviews.data?.find((p) => p.head_branch === t?.branch);
-  const [tab, setTab] = useState<Tab>("changes");
-  const [openPath, setOpenPath] = useState<string | null>(null);
+  const [tab, setTab] = useState<Tab>(initialPath ? "editor" : "changes");
+  const [openPath, setOpenPath] = useState<string | null>(initialPath ?? null);
+  const [menu, setMenu] = useState(false);
   const [buffer, setBuffer] = useState("");
   const [dirty, setDirty] = useState(false);
   const [submitOpen, setSubmitOpen] = useState(false);
@@ -44,6 +45,10 @@ export function ThreadView({ slug }: { slug: string }) {
       qc.invalidateQueries({ queryKey: ["wt-docs", t?.path] });
       qc.invalidateQueries({ queryKey: ["wt-file", t?.path, openPath] });
     },
+  });
+  const abandon = useMutation({
+    mutationFn: () => api.abandonThread(root, slug),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["threads", root] }); go({ kind: "home" }); },
   });
   const submit = useMutation({
     mutationFn: () => api.submitThread(root, slug, title.trim(), summary.trim() || null),
@@ -82,6 +87,16 @@ export function ThreadView({ slug }: { slug: string }) {
             Submit for review
           </button>
         )}
+        <div className="relative">
+          <button onClick={() => setMenu((m) => !m)} className="p-1.5 rounded-md hover:bg-bg-muted text-fg-muted" title="More"><MoreHorizontal size={14} /></button>
+          {menu && (
+            <div className="absolute right-0 top-8 z-10 w-48 rounded-md border border-border bg-bg-elevated shadow-sm py-1 text-xs">
+              <div className="px-3 py-1 text-fg-muted font-mono truncate" title={t.branch}>{t.branch}</div>
+              <button onClick={() => { setMenu(false); if (window.confirm(pr ? "Abandon this thread? The open review stays on the provider; the local worktree and branch are removed." : "Abandon this thread and delete its changes?")) abandon.mutate(); }}
+                className="w-full text-left px-3 py-1.5 hover:bg-bg-muted text-danger flex items-center gap-2"><Trash2 size={12} /> Abandon thread</button>
+            </div>
+          )}
+        </div>
       </header>
 
       {submitOpen && (

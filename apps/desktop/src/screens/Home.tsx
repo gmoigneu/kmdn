@@ -12,6 +12,12 @@ export function Home() {
   const [text, setText] = useState("");
   const [mode, setMode] = useState<"suggest" | "edit">("edit");
   const threads = useQuery({ queryKey: ["threads", root], queryFn: () => api.listThreads(root) });
+  const reviews = useQuery({ queryKey: ["reviews", root], queryFn: () => api.listReviews(root), enabled: kb!.authenticated, retry: false });
+  const prFor = (branch: string) => reviews.data?.find((p) => p.head_branch === branch);
+  const groups = [
+    { title: "In review", items: threads.data?.filter((t) => prFor(t.branch)) ?? [] },
+    { title: "Draft", items: threads.data?.filter((t) => !prFor(t.branch)) ?? [] },
+  ];
   const create = useMutation({
     mutationFn: (slug: string) => api.createThread(root, slug),
     onSuccess: (t) => { qc.invalidateQueries({ queryKey: ["threads", root] }); setText(""); go({ kind: "thread", slug: t.slug }); },
@@ -40,19 +46,27 @@ export function Home() {
         </div>
         {create.error && <p className="mt-2 text-danger text-xs">{String(create.error)}</p>}
 
-        <h2 className="mt-10 text-[11px] uppercase tracking-wide text-fg-muted">Draft</h2>
-        <ul className="mt-2 divide-y divide-border rounded-md border border-border">
-          {threads.data?.map((t) => (
-            <li key={t.slug}>
-              <button onClick={() => go({ kind: "thread", slug: t.slug })} className="w-full flex items-center gap-3 px-3 py-2 hover:bg-bg-muted text-left">
-                <Pencil size={14} className="text-fg-muted" />
-                <span className="flex-1 truncate">{t.slug}</span>
-                <span className="font-mono text-[10px] text-fg-muted truncate max-w-[40%]">{t.branch}</span>
-              </button>
-            </li>
-          ))}
-          {!threads.data?.length && <li className="px-3 py-3 text-fg-muted text-xs">No threads yet.</li>}
-        </ul>
+        {groups.map((g) => g.items.length > 0 && (
+          <div key={g.title}>
+            <h2 className="mt-10 text-[11px] uppercase tracking-wide text-fg-muted">{g.title}</h2>
+            <ul className="mt-2 divide-y divide-border rounded-md border border-border">
+              {g.items.map((t) => {
+                const p = prFor(t.branch);
+                return (
+                  <li key={t.slug}>
+                    <button onClick={() => go({ kind: "thread", slug: t.slug })} className="w-full flex items-center gap-3 px-3 py-2 hover:bg-bg-muted text-left">
+                      <Pencil size={14} className={p ? "text-accent" : "text-fg-muted"} />
+                      <span className="flex-1 truncate">{p?.title ?? t.slug}</span>
+                      {p && <span className="text-[10px] text-fg-muted">#{p.number}</span>}
+                      <span className="font-mono text-[10px] text-fg-muted truncate max-w-[35%]">{t.branch}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ))}
+        {!threads.data?.length && <p className="mt-10 text-fg-muted text-xs">No threads yet. Describe a change above, or open a document and press Edit.</p>}
       </div>
     </div>
   );

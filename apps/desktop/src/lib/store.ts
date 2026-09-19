@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { KbInfo } from "./api";
 
-export type View = { kind: "home" } | { kind: "thread"; slug: string } | { kind: "document"; path: string } | { kind: "review"; number: number };
+export type View = { kind: "home" } | { kind: "thread"; slug: string; openPath?: string } | { kind: "document"; path: string } | { kind: "review"; number: number };
 
 interface UiState {
   kb: KbInfo | null;

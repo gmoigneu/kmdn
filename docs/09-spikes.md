@@ -21,7 +21,7 @@ Goal: from Rust, drive each agent's official structured mode: `claude` stream-js
 Pass per agent: session starts with the user's existing login, a reply streams, the agent attempts a write outside allowed paths and kmdn denies it, the file does not land on disk, an allowed write does, the session resumes after the process is restarted.
 Decide: the shape of the internal interface after seeing three real wire formats, and whether pi's RPC exposes a usable permission event. Also record a fixture per agent for CI.
 
-### Spike 4: worktrees with libgit2
+### Spike 4: worktrees with libgit2 (done 2026-09-19, pass, covered by kmdn-core tests)
 Goal: create, list, remove worktrees from git2-rs; rebase a worktree branch onto origin/main; stash from the main clone and apply into a worktree.
 Pass: three threads with worktrees, two agents writing concurrently, no cross-talk, rebase of one worktree while another is dirty. Half a week.
 
