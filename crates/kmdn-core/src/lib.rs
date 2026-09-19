@@ -9,6 +9,9 @@
 //! - `diff`: a thread's changes versus the default branch, with old and new text
 //! - `sync`: fetch, fast-forward, rebase worktrees, push with lease
 //! - `local_changes`: the main clone's dirty state, move to thread, adopt branch
+//! - `provider`: GitHub and GitLab behind one trait: PRs, reviews, comments, issues, auth
+//! - `submit`: checks, index, push with lease, create or update the PR, agent log comment
+//! - `secrets`: provider token storage
 //!
 //! Providers, the block-level conflict model, and agent adapters land in later issues.
 
@@ -18,7 +21,10 @@ pub mod diff;
 pub mod frontmatter;
 pub mod index;
 pub mod local_changes;
+pub mod provider;
 pub mod repo;
+pub mod secrets;
+pub mod submit;
 pub mod sync;
 #[cfg(test)]
 mod test_support;
