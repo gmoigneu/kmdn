@@ -1,0 +1,99 @@
+//! New knowledge base from the template (D61): files, first commit, remote.
+
+use std::path::Path;
+
+use git2::{IndexAddOption, Repository, Signature};
+
+use crate::commit::Author;
+use crate::index;
+use crate::repo::RepoError;
+
+pub fn write_template(dest: &Path, name: &str, description: &str) -> std::io::Result<()> {
+    std::fs::create_dir_all(dest.join(index::CONFIG_DIR))?;
+    std::fs::write(
+        dest.join(index::CONFIG_DIR).join("config.yaml"),
+        format!(
+            "version: 1\nname: {name}\ndescription: {description}\nbranch_prefix: kmdn/\nreview:\n  labels: [kmdn]\n  post_agent_log: true\nassets:\n  max_bytes: 5242880\nagents:\n  allowed_paths: [\"**/*.md\", \"**/assets/**\"]\n"
+        ),
+    )?;
+    std::fs::write(
+        dest.join("README.md"),
+        format!("# {name}\n\n{description}\n\nStart here. This knowledge base is maintained with kmdn.\n"),
+    )?;
+    std::fs::write(
+        dest.join("getting-started.md"),
+        "---\ntitle: Getting started\ndescription: How this knowledge base is organized and how to contribute.\nstatus: published\norder: 1\n---\n# Getting started\n\nDocuments are markdown files. Folders are sections. Every change is a pull request.\n",
+    )?;
+    index::write_agents_md(dest)?;
+    Ok(())
+}
+
+/// Initializes a repo on `main` at `dest` with the template committed and `origin` set.
+pub fn init_new_kb(
+    dest: &Path,
+    name: &str,
+    description: &str,
+    author: &Author,
+    origin_url: Option<&str>,
+) -> Result<Repository, RepoError> {
+    std::fs::create_dir_all(dest).map_err(|e| git2::Error::from_str(&e.to_string()))?;
+    let repo = Repository::init_opts(
+        dest,
+        git2::RepositoryInitOptions::new().initial_head("main"),
+    )?;
+    write_template(dest, name, description).map_err(|e| git2::Error::from_str(&e.to_string()))?;
+    let mut idx = repo.index()?;
+    idx.add_all(["*"].iter(), IndexAddOption::DEFAULT, None)?;
+    idx.write()?;
+    let tree_oid = idx.write_tree()?;
+    {
+        let tree = repo.find_tree(tree_oid)?;
+        let sig = Signature::now(&author.name, &author.email)?;
+        repo.commit(
+            Some("HEAD"),
+            &sig,
+            &sig,
+            "Initialize knowledge base",
+            &tree,
+            &[],
+        )?;
+    }
+    if let Some(url) = origin_url {
+        repo.remote("origin", url)?;
+    }
+    Ok(repo)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn creates_a_valid_kb() {
+        let d = tempfile::tempdir().unwrap();
+        let dest = d.path().join("kb");
+        let author = Author {
+            name: "A".into(),
+            email: "a@x.io".into(),
+        };
+        let repo = init_new_kb(
+            &dest,
+            "Team KB",
+            "Docs.",
+            &author,
+            Some("https://github.com/acme/kb.git"),
+        )
+        .unwrap();
+        assert_eq!(repo.head().unwrap().shorthand(), Some("main"));
+        assert!(dest.join("AGENTS.md").exists() && dest.join(".kmdn/config.yaml").exists());
+        assert!(crate::checks::run(&dest, &crate::checks::Options_::default_cap()).is_empty());
+        assert_eq!(
+            crate::index::read_config(&dest).name.as_deref(),
+            Some("Team KB")
+        );
+        assert_eq!(
+            repo.find_remote("origin").unwrap().url(),
+            Some("https://github.com/acme/kb.git")
+        );
+    }
+}

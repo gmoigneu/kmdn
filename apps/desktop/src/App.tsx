@@ -1,13 +1,14 @@
 import { useUi } from "./lib/store";
 import { Sidebar } from "./components/Sidebar";
-import { OpenKb } from "./screens/OpenKb";
+import { SignIn } from "./screens/SignIn";
 import { Home } from "./screens/Home";
 import { ThreadView } from "./screens/ThreadView";
 import { DocumentView } from "./screens/DocumentView";
+import { ReviewView } from "./screens/ReviewView";
 
 export default function App() {
   const { kb, view } = useUi();
-  if (!kb) return <OpenKb />;
+  if (!kb) return <SignIn />;
   return (
     <div className="flex h-full">
       <Sidebar />
@@ -15,7 +16,7 @@ export default function App() {
         {view.kind === "home" && <Home />}
         {view.kind === "thread" && <ThreadView slug={view.slug} />}
         {view.kind === "document" && <DocumentView path={view.path} />}
-        {view.kind === "review" && <div className="p-6 text-fg-muted">Review layout lands in #28.</div>}
+        {view.kind === "review" && <ReviewView number={view.number} />}
       </main>
     </div>
   );

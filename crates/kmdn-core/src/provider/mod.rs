@@ -2,6 +2,7 @@
 //! Blocking HTTP; callers run it off the UI thread.
 
 pub mod github;
+pub mod gitlab;
 pub mod mock;
 
 use serde::{Deserialize, Serialize};

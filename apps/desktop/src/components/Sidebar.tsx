@@ -28,6 +28,7 @@ function useSyncLoop(root: string) {
       qc.invalidateQueries({ queryKey: ["docs", root] });
       qc.invalidateQueries({ queryKey: ["local", root] });
       qc.invalidateQueries({ queryKey: ["changes", root] });
+      qc.invalidateQueries({ queryKey: ["reviews", root] });
     },
   });
   useEffect(() => {
@@ -57,6 +58,7 @@ export function Sidebar() {
   const threads = useQuery({ queryKey: ["threads", root], queryFn: () => api.listThreads(root) });
   const docs = useQuery({ queryKey: ["docs", root], queryFn: () => api.listDocuments(root) });
   const local = useQuery({ queryKey: ["local", root], queryFn: () => api.localChanges(root), refetchInterval: 5_000 });
+  const reviews = useQuery({ queryKey: ["reviews", root], queryFn: () => api.listReviews(root), enabled: kb!.authenticated, refetchInterval: 60_000, retry: false });
   const sync = useSyncLoop(root);
   const move = useMutation({
     mutationFn: () => api.moveLocalChangesToThread(root, "local-changes"),
@@ -116,8 +118,19 @@ export function Sidebar() {
             </button>
           )) : !hasLocal && <div className="px-2 text-xs text-fg-muted">No threads yet.</div>}
         </Section>
-        <Section title="Reviews" icon={GitPullRequest} count={0}>
-          <div className="px-2 text-xs text-fg-muted">Connect a provider to see reviews (#12).</div>
+        <Section title="Reviews" icon={GitPullRequest} count={reviews.data?.length}>
+          {!kb!.authenticated && <div className="px-2 text-xs text-fg-muted">Sign in to see reviews.</div>}
+          {reviews.error && <div className="px-2 text-xs text-danger">{String(reviews.error)}</div>}
+          {reviews.data?.map((p) => (
+            <button key={p.number} onClick={() => go({ kind: "review", number: p.number })}
+              className={cn("w-full text-left px-2 py-1 rounded-md hover:bg-bg-elevated flex items-center gap-2",
+                view.kind === "review" && view.number === p.number && "bg-bg-elevated")} title={p.url}>
+              <span className="text-fg-muted tabular-nums text-[11px]">#{p.number}</span>
+              <span className="truncate flex-1">{p.title}</span>
+              <span className="text-[10px] text-fg-muted">{p.author}</span>
+            </button>
+          ))}
+          {kb!.authenticated && reviews.data?.length === 0 && <div className="px-2 text-xs text-fg-muted">No open reviews.</div>}
         </Section>
         <Section title="Documents" icon={FileText} count={docs.data?.length}>
           {docs.data?.map((d) => (

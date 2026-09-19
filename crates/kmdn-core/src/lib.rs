@@ -4,6 +4,7 @@
 //! - `repo`: open a clone, detect provider from the remote, default branch
 //! - `worktree`: one worktree per thread
 //! - `index`: frontmatter, document tree, AGENTS.md generation
+//! - `bootstrap`: new knowledge base from the template
 //! - `checks`: link, frontmatter, asset, stale-index checks
 //! - `commit`: commit on save, allowed paths only
 //! - `diff`: a thread's changes versus the default branch, with old and new text
@@ -15,6 +16,7 @@
 //!
 //! Providers, the block-level conflict model, and agent adapters land in later issues.
 
+pub mod bootstrap;
 pub mod checks;
 pub mod commit;
 pub mod diff;

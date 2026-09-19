@@ -33,7 +33,23 @@ export interface KbInfo {
   dirty_paths: string[];
   config: KbConfig;
   user: Author;
+  authenticated: boolean;
 }
+
+export interface StoredHost { host: string; login: string; kind: string }
+export interface AuthStatus { hosts: StoredHost[]; github_device_flow_available: boolean }
+export interface DeviceCode { device_code: string; user_code: string; verification_uri: string; expires_in: number; interval: number }
+export interface User { login: string; name: string | null; email: string | null; avatar_url: string | null }
+export interface RepoSummary { owner: string; name: string; full_name: string; private: boolean; default_branch: string; https_url: string; description: string | null }
+
+export type PullState = "open" | "closed" | "merged";
+export interface PullRequest {
+  number: number; title: string; body: string; author: string; head_branch: string; base_branch: string;
+  state: PullState; draft: boolean; url: string; updated_at: string; files: string[];
+}
+export interface Comment { id: number; author: string; body: string; created_at: string; url: string; path: string | null; line: number | null; side: "left" | "right" | null }
+export interface Submission { pull: PullRequest; created: boolean; pushed_head: string; log_comment: Comment | null }
+export interface SubmitOutcome { submission: Submission | null; findings: Finding[]; error: string | null }
 
 export type Status = "draft" | "review" | "published" | "deprecated";
 
@@ -110,4 +126,17 @@ export const api = {
   localChanges: (root: string) => invoke<LocalChanges>("local_changes", { root }),
   moveLocalChangesToThread: (root: string, slug: string) =>
     invoke<ThreadWorktree>("move_local_changes_to_thread", { root, slug }),
+  submitThread: (root: string, slug: string, title: string, summary: string | null) =>
+    invoke<SubmitOutcome>("submit_thread", { root, slug, title, summary }),
+  listReviews: (root: string) => invoke<PullRequest[]>("list_reviews", { root }),
+  cloneKb: (url: string, dest: string) => invoke<KbInfo>("clone_kb", { url, dest }),
+  createKb: (host: string, name: string, description: string, org: string | null, dest: string) =>
+    invoke<KbInfo>("create_kb", { host, name, description, org, dest }),
+  authStatus: () => invoke<AuthStatus>("auth_status"),
+  authStartDeviceFlow: () => invoke<DeviceCode>("auth_start_device_flow"),
+  authPollDeviceFlow: (deviceCode: string) => invoke<string>("auth_poll_device_flow", { deviceCode }),
+  authSavePat: (host: string, token: string) => invoke<User>("auth_save_pat", { host, token }),
+  authSignOut: (host: string) => invoke<void>("auth_sign_out", { host }),
+  listRemoteRepos: (host: string) => invoke<RepoSummary[]>("list_remote_repos", { host }),
+  defaultCloneDir: (name: string) => invoke<string>("default_clone_dir", { name }),
 };

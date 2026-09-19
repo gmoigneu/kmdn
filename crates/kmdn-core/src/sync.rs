@@ -45,6 +45,15 @@ fn callbacks(token: Option<&Token>) -> RemoteCallbacks<'_> {
     cb
 }
 
+/// Clones `url` into `dest` using kmdn's own credentials (D7, D9).
+pub fn clone_repo(url: &str, dest: &Path, token: Option<&Token>) -> Result<Repository, RepoError> {
+    let mut fo = FetchOptions::new();
+    fo.remote_callbacks(callbacks(token));
+    let mut builder = git2::build::RepoBuilder::new();
+    builder.fetch_options(fo);
+    Ok(builder.clone(url, dest)?)
+}
+
 pub fn fetch(repo: &Repository, remote: &str, token: Option<&Token>) -> Result<(), RepoError> {
     let mut r = repo.find_remote(remote)?;
     let mut fo = FetchOptions::new();
