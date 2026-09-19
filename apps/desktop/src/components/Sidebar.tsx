@@ -21,9 +21,14 @@ function Section({ title, icon: Icon, count, children }: { title: string; icon: 
 /** Fetch, fast-forward, rebase (D31): on focus and every 60s, backing off when unfocused. */
 function useSyncLoop(root: string) {
   const qc = useQueryClient();
+  const setConflicts = useUi((s) => s.setConflicts);
   const sync = useMutation({
     mutationFn: () => api.syncNow(root),
-    onSuccess: () => {
+    onSuccess: (report) => {
+      for (const [slug, outcome] of report.threads) {
+        if ("Ok" in outcome && typeof outcome.Ok === "object" && "Conflicts" in outcome.Ok) setConflicts(slug, outcome.Ok.Conflicts);
+        else if ("Ok" in outcome) setConflicts(slug, null);
+      }
       qc.invalidateQueries({ queryKey: ["threads", root] });
       qc.invalidateQueries({ queryKey: ["docs", root] });
       qc.invalidateQueries({ queryKey: ["local", root] });
@@ -52,7 +57,7 @@ function useSyncLoop(root: string) {
 }
 
 export function Sidebar() {
-  const { kb, view, go, sidebarCollapsed, toggleSidebar } = useUi();
+  const { kb, view, go, sidebarCollapsed, toggleSidebar, conflicts } = useUi();
   const root = kb!.root;
   const qc = useQueryClient();
   const threads = useQuery({ queryKey: ["threads", root], queryFn: () => api.listThreads(root) });
@@ -112,7 +117,7 @@ export function Sidebar() {
             <button key={t.slug} onClick={() => go({ kind: "thread", slug: t.slug })}
               className={cn("w-full text-left px-2 py-1 rounded-md truncate hover:bg-bg-elevated flex items-center gap-2",
                 view.kind === "thread" && view.slug === t.slug && "bg-bg-elevated")}>
-              <span className={cn("size-1.5 rounded-full", reviews.data?.some((p) => p.head_branch === t.branch) ? "bg-accent" : "bg-fg-muted")} />
+              <span className={cn("size-1.5 rounded-full", conflicts[t.slug] ? "bg-warn" : reviews.data?.some((p) => p.head_branch === t.branch) ? "bg-accent" : "bg-fg-muted")} title={conflicts[t.slug] ? "Conflicts with main" : undefined} />
               <span className="truncate">{reviews.data?.find((p) => p.head_branch === t.branch)?.title ?? t.slug}</span>
               <span className={cn("ml-auto text-[10px] px-1.5 rounded-full border", reviews.data?.some((p) => p.head_branch === t.branch) ? "border-accent text-accent" : "border-border text-fg-muted")}>
                 {reviews.data?.some((p) => p.head_branch === t.branch) ? "in review" : "draft"}

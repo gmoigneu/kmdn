@@ -426,6 +426,49 @@ async fn sync_now(state: State<'_, AppState>, root: String) -> Result<SyncReport
     .await
 }
 
+/// Rebase one thread onto main, settling conflicts with the resolver's content per file (D21).
+#[tauri::command]
+async fn resolve_thread_conflicts(
+    state: State<'_, AppState>,
+    root: String,
+    slug: String,
+    resolutions: std::collections::HashMap<String, String>,
+) -> Result<RebaseOutcome, String> {
+    let secrets = state.secrets.clone();
+    blocking(move || {
+        let repo = Repo::open(&root).map_err(err)?;
+        let wt = worktree_for(&repo, &slug)?;
+        if let Ok(remote) = repo.remote_info("origin") {
+            let token = token_for(&secrets, &remote).map(|(_, t)| t);
+            sync::fetch(repo.git(), "origin", token.as_ref()).map_err(err)?;
+        }
+        let base = base_ref(&repo)?;
+        sync::rebase_worktree_resolving(&wt.path, &base, &resolutions).map_err(err)
+    })
+    .await
+}
+
+/// Current conflict state of one thread against main, for the resolver (no changes made).
+#[tauri::command]
+async fn thread_conflicts(
+    state: State<'_, AppState>,
+    root: String,
+    slug: String,
+) -> Result<RebaseOutcome, String> {
+    let secrets = state.secrets.clone();
+    blocking(move || {
+        let repo = Repo::open(&root).map_err(err)?;
+        let wt = worktree_for(&repo, &slug)?;
+        if let Ok(remote) = repo.remote_info("origin") {
+            let token = token_for(&secrets, &remote).map(|(_, t)| t);
+            sync::fetch(repo.git(), "origin", token.as_ref()).map_err(err)?;
+        }
+        let base = base_ref(&repo)?;
+        sync::rebase_worktree(&wt.path, &base).map_err(err)
+    })
+    .await
+}
+
 #[tauri::command]
 fn local_changes(root: String) -> Result<LocalChanges, String> {
     local_changes::inspect(&Repo::open(&root).map_err(err)?).map_err(err)
@@ -829,6 +872,8 @@ pub fn run() {
             sync_now,
             local_changes,
             move_local_changes_to_thread,
+            resolve_thread_conflicts,
+            thread_conflicts,
             list_reviews,
             review_detail,
             review_comment,

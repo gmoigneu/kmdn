@@ -9,15 +9,18 @@ import { RenderedDiff } from "@/components/RenderedDiff";
 import { RenderedMarkdown } from "@/components/RenderedMarkdown";
 import { MarkdownEditor } from "@/components/MarkdownEditor";
 import { AgentPanel } from "@/components/AgentPanel";
+import { ConflictResolver } from "@/components/ConflictResolver";
 
 type Tab = "changes" | "editor" | "read";
 
 const statusLabel: Record<FileChange["status"], string> = { added: "A", modified: "M", deleted: "D", renamed: "R" };
 
 export function ThreadView({ slug, initialPath }: { slug: string; initialPath?: string }) {
-  const { kb, go } = useUi();
+  const { kb, go, conflicts, setConflicts } = useUi();
   const root = kb!.root;
   const qc = useQueryClient();
+  const [resolving, setResolving] = useState(false);
+  const conflictFiles = conflicts[slug];
   const threads = useQuery({ queryKey: ["threads", root], queryFn: () => api.listThreads(root) });
   const t = threads.data?.find((x) => x.slug === slug);
   const reviews = useQuery({ queryKey: ["reviews", root], queryFn: () => api.listReviews(root), enabled: kb!.authenticated, retry: false });
@@ -116,6 +119,12 @@ export function ThreadView({ slug, initialPath }: { slug: string; initialPath?: 
           )}
         </div>
       )}
+      {conflictFiles && !resolving && (
+        <div className="border-b border-warn/50 bg-bg-muted px-4 py-2 text-xs flex items-center gap-2">
+          <span className="text-warn">This thread conflicts with main in {conflictFiles.length} file{conflictFiles.length === 1 ? "" : "s"}.</span>
+          <button onClick={() => setResolving(true)} className="h-6 px-2 rounded-md bg-accent text-accent-fg">Resolve</button>
+        </div>
+      )}
       {outcome?.submission && !submitOpen && (
         <div className="border-b border-border bg-bg-muted px-4 py-2 text-xs flex items-center gap-2">
           <span className="text-ok">{outcome.submission.created ? "Review opened" : "Review updated"}.</span>
@@ -124,6 +133,11 @@ export function ThreadView({ slug, initialPath }: { slug: string; initialPath?: 
         </div>
       )}
 
+      {resolving && conflictFiles ? (
+        <ConflictResolver root={root} slug={slug} files={conflictFiles}
+          onDone={() => { setResolving(false); setConflicts(slug, null); qc.invalidateQueries({ queryKey: ["changes", root, slug] }); qc.invalidateQueries({ queryKey: ["wt-docs", t.path] }); }}
+          onCancel={() => setResolving(false)} />
+      ) : (
       <div className="flex-1 flex min-h-0">
         <section className="w-[38%] min-w-[320px] border-r border-border flex flex-col">
           <AgentPanel root={root} slug={slug} branch={t.branch} onChanged={() => { qc.invalidateQueries({ queryKey: ["changes", root, slug] }); qc.invalidateQueries({ queryKey: ["wt-docs", t.path] }); qc.invalidateQueries({ queryKey: ["wt-file", t.path] }); }} />
@@ -176,6 +190,7 @@ export function ThreadView({ slug, initialPath }: { slug: string; initialPath?: 
           </div>
         </section>
       </div>
+      )}
     </div>
   );
 }

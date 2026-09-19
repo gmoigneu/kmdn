@@ -140,6 +140,16 @@ fn blob_text(repo: &Repository, entry: Option<&git2::IndexEntry>) -> Option<Stri
 /// A conflict touching only `AGENTS.md` is resolved by regenerating it. Any other conflict
 /// aborts the rebase and returns the conflicting files for the resolver.
 pub fn rebase_worktree(worktree: &Path, onto_ref: &str) -> Result<RebaseOutcome, RepoError> {
+    rebase_worktree_resolving(worktree, onto_ref, &std::collections::HashMap::new())
+}
+
+/// Like `rebase_worktree`, but a conflict on a path present in `resolutions` is settled with
+/// that content (the resolver's output) and the rebase continues.
+pub fn rebase_worktree_resolving(
+    worktree: &Path,
+    onto_ref: &str,
+    resolutions: &std::collections::HashMap<String, String>,
+) -> Result<RebaseOutcome, RepoError> {
     let repo = Repository::open(worktree)?;
     let head_ref = repo.head()?;
     let head_oid = head_ref
@@ -189,8 +199,29 @@ pub fn rebase_worktree(worktree: &Path, onto_ref: &str) -> Result<RebaseOutcome,
                     base: blob_text(&repo, c.ancestor.as_ref()),
                 });
             }
-            let only_index = files.iter().all(|f| f.path == index::AGENTS_FILE);
-            if only_index {
+            let resolvable = files
+                .iter()
+                .all(|f| f.path == index::AGENTS_FILE || resolutions.contains_key(&f.path));
+            if resolvable {
+                let root = repo
+                    .workdir()
+                    .ok_or_else(|| git2::Error::from_str("no workdir"))?;
+                for f in &files {
+                    if let Some(content) = resolutions.get(&f.path) {
+                        std::fs::write(root.join(&f.path), content)
+                            .map_err(|e| git2::Error::from_str(&e.to_string()))?;
+                        idx.remove_path(Path::new(&f.path))?;
+                        idx.add_path(Path::new(&f.path))?;
+                    }
+                }
+                if files.iter().any(|f| f.path == index::AGENTS_FILE) {
+                    idx.remove_path(Path::new(index::AGENTS_FILE))?;
+                    index::write_agents_md(root)
+                        .map_err(|e| git2::Error::from_str(&e.to_string()))?;
+                    idx.add_path(Path::new(index::AGENTS_FILE))?;
+                }
+                idx.write()?;
+            } else if false {
                 // Derived file: regenerate from the merged tree and continue (D56).
                 let root = repo
                     .workdir()
@@ -399,6 +430,39 @@ mod tests {
         assert_eq!(
             push_with_lease(&wrepo, "origin", &wt.branch, Some(now), None).unwrap(),
             PushOutcome::Pushed
+        );
+    }
+
+    #[test]
+    fn rebase_applies_resolutions_from_the_resolver() {
+        let (_d, root, upstream) = seeded_repo_with_origin();
+        let repo = Repo::open(&root).unwrap();
+        let allowed = allowed_set(DEFAULT_ALLOWED).unwrap();
+        let wt = repo
+            .create_thread_worktree("a", "fix", "refs/remotes/origin/main")
+            .unwrap();
+        std::fs::write(wt.path.join("README.md"), "# KB\nthread line\n").unwrap();
+        commit_allowed(&wt.path, "thread", &author(), &allowed).unwrap();
+        commit_on_origin(&upstream, "README.md", "# KB\nmain line\n", "main");
+        fetch(repo.git(), "origin", None).unwrap();
+        assert!(matches!(
+            rebase_worktree(&wt.path, "refs/remotes/origin/main").unwrap(),
+            RebaseOutcome::Conflicts(_)
+        ));
+        let mut res = std::collections::HashMap::new();
+        res.insert(
+            "README.md".to_string(),
+            "# KB\nmain line\nthread line\n".to_string(),
+        );
+        let out = rebase_worktree_resolving(&wt.path, "refs/remotes/origin/main", &res).unwrap();
+        assert!(matches!(out, RebaseOutcome::Rebased { .. }), "{out:?}");
+        assert_eq!(
+            std::fs::read_to_string(wt.path.join("README.md")).unwrap(),
+            "# KB\nmain line\nthread line\n"
+        );
+        assert_eq!(
+            Repository::open(&wt.path).unwrap().state(),
+            git2::RepositoryState::Clean
         );
     }
 }
