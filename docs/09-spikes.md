@@ -16,7 +16,7 @@ Goal: two versions of a real document, rendered, aligned by block, word-level hi
 Pass: a 50-block document with insertions, deletions, and an edited paragraph renders correctly; a comment can be anchored to a rendered block and mapped to a line number in the new file.
 Decide: own block alignment versus adapting an existing HTML diff tool.
 
-### Spike 3: native agent adapters
+### Spike 3: native agent adapters (done 2026-09-19, pass for all three, see spikes/agents/README.md)
 Goal: from Rust, drive each agent's official structured mode: `claude` stream-json, `codex app-server`, `pi --mode rpc`.
 Pass per agent: session starts with the user's existing login, a reply streams, the agent attempts a write outside allowed paths and kmdn denies it, the file does not land on disk, an allowed write does, the session resumes after the process is restarted.
 Decide: the shape of the internal interface after seeing three real wire formats, and whether pi's RPC exposes a usable permission event. Also record a fixture per agent for CI.

@@ -8,17 +8,20 @@ kmdn defines one internal agent interface in Rust and ships one adapter per agen
 |---|---|---|
 | Claude Code | `claude -p --input-format stream-json --output-format stream-json`, newline JSON over stdio | `--permission-prompt-tool` answered by kmdn, `--disallowedTools "Edit(...)"` deny rules for paths outside allowed globs, PreToolUse hook as belt and braces |
 | Codex | `codex app-server`, JSON-RPC 2.0 over stdio | approval requests on the stream, answered by kmdn |
-| pi | `pi --mode rpc`, pi's JSON over stdio | pi's RPC permission events |
+| pi | `pi --mode rpc -e <kmdn gate extension>`, pi's JSONL over stdio | kmdn-shipped extension handles `tool_call`: blocks writes outside allowed globs, asks the host via `extension_ui_request` confirm |
 | Others, later | generic ACP client | ACP `session/request_permission` |
 
 ### Internal interface, normalized events
 - `start(cwd, mode, system_context) -> session`, `resume(session_id)`
 - `send(user_message, attachments)`
-- streamed out: `text_delta`, `tool_call_started {id, kind, paths}`, `tool_call_finished {id, result}`, `permission_request {id, kind, paths, command}`, `turn_done`, `error`
+- streamed out: `text_delta`, `tool_call_started {id, kind, paths}`, `tool_call_finished {id, result}`, `permission_request {id, kind, paths, command}` (paths resolved by the adapter; Codex sends them in `item/started`, not in the request), `turn_done`, `error`
 - in: `permission_reply {id, allow|deny, reason}`, `cancel`
 - `models()` when the agent exposes a list, else empty
 
 The UI timeline renders only these events. Nothing agent-specific leaks above the adapter.
+
+### Verified 2026-09-19
+Spike 3 passed all criteria for the three agents: start with the user's login, stream, deny a non-markdown write before disk, allow a markdown write, gate shell, resume after restart. Details and fixtures in `spikes/agents/`.
 
 ### Wire-format drift
 Each adapter has recorded-session fixtures in CI. When a CLI release changes its output, the fixture test fails before users notice. Re-record on upgrade.
