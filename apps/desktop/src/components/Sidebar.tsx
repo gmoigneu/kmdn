@@ -69,6 +69,10 @@ export function Sidebar() {
     mutationFn: () => api.moveLocalChangesToThread(root, "local-changes"),
     onSuccess: (t) => { qc.invalidateQueries({ queryKey: ["threads", root] }); qc.invalidateQueries({ queryKey: ["local", root] }); go({ kind: "thread", slug: t.slug }); },
   });
+  const adopt = useMutation({
+    mutationFn: (branch: string) => api.adoptBranch(root, branch),
+    onSuccess: (t) => { qc.invalidateQueries({ queryKey: ["threads", root] }); qc.invalidateQueries({ queryKey: ["local", root] }); go({ kind: "thread", slug: t.slug }); },
+  });
   const hasLocal = local.data && (local.data.dirty_paths.length > 0 || local.data.foreign_branch || local.data.operation_in_progress);
 
   if (sidebarCollapsed) {
@@ -111,7 +115,10 @@ export function Sidebar() {
               {!local.data!.foreign_branch && !local.data!.operation_in_progress && (
                 <button onClick={() => move.mutate()} disabled={move.isPending} className="mt-1.5 h-6 px-2 rounded-md border border-border text-[11px] hover:bg-bg-elevated disabled:opacity-40">Move to new thread</button>
               )}
-              {move.error && <p className="text-danger text-[11px] mt-1">{String(move.error)}</p>}
+              {local.data!.foreign_branch && !local.data!.operation_in_progress && (
+                <button onClick={() => adopt.mutate(local.data!.foreign_branch!)} disabled={adopt.isPending} className="mt-1.5 h-6 px-2 rounded-md border border-border text-[11px] hover:bg-bg-elevated disabled:opacity-40">Adopt branch as thread</button>
+              )}
+              {(move.error || adopt.error) && <p className="text-danger text-[11px] mt-1">{String(move.error ?? adopt.error)}</p>}
             </div>
           )}
           {threads.data?.length ? threads.data.map((t) => (

@@ -148,6 +148,7 @@ export const api = {
   localChanges: (root: string) => invoke<LocalChanges>("local_changes", { root }),
   moveLocalChangesToThread: (root: string, slug: string) =>
     invoke<ThreadWorktree>("move_local_changes_to_thread", { root, slug }),
+  adoptBranch: (root: string, branch: string) => invoke<ThreadWorktree>("adopt_branch", { root, branch }),
   threadConflicts: (root: string, slug: string) => invoke<RebaseOutcome>("thread_conflicts", { root, slug }),
   resolveThreadConflicts: (root: string, slug: string, resolutions: Record<string, string>) =>
     invoke<RebaseOutcome>("resolve_thread_conflicts", { root, slug, resolutions }),

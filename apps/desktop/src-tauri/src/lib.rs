@@ -426,6 +426,35 @@ async fn sync_now(state: State<'_, AppState>, root: String) -> Result<SyncReport
     .await
 }
 
+/// Registers a branch someone checked out in the main clone as a thread (D45). Never renames.
+#[tauri::command]
+fn adopt_branch(root: String, branch: String) -> Result<ThreadWorktree, String> {
+    let repo = Repo::open(&root).map_err(err)?;
+    let default = repo.default_branch().map_err(err)?;
+    // Put the main clone back on its default branch so the worktree can own the branch.
+    if repo.head_branch().map_err(err)?.as_deref() == Some(branch.as_str()) {
+        if repo.is_dirty().map_err(err)? {
+            return Err(
+                "the clone has uncommitted changes on that branch; commit or move them first"
+                    .into(),
+            );
+        }
+        repo.git()
+            .set_head(&format!("refs/heads/{default}"))
+            .map_err(err)?;
+        repo.git()
+            .checkout_head(Some(git2_checkout_force().as_mut()))
+            .map_err(err)?;
+    }
+    local_changes::adopt_branch(&repo, &branch).map_err(err)
+}
+
+fn git2_checkout_force() -> Box<kmdn_core::git2::build::CheckoutBuilder<'static>> {
+    let mut cb = kmdn_core::git2::build::CheckoutBuilder::new();
+    cb.force();
+    Box::new(cb)
+}
+
 /// Rebase one thread onto main, settling conflicts with the resolver's content per file (D21).
 #[tauri::command]
 async fn resolve_thread_conflicts(
@@ -928,6 +957,7 @@ pub fn run() {
             sync_now,
             local_changes,
             move_local_changes_to_thread,
+            adopt_branch,
             resolve_thread_conflicts,
             thread_conflicts,
             doc_discussion,

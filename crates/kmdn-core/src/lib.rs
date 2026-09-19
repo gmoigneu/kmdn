@@ -34,4 +34,5 @@ pub mod sync;
 mod test_support;
 pub mod worktree;
 
+pub use git2;
 pub use repo::{ProviderKind, RemoteInfo, Repo};
