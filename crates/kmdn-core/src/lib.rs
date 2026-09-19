@@ -5,13 +5,21 @@
 //! - `worktree`: one worktree per thread
 //! - `index`: frontmatter, document tree, AGENTS.md generation
 //! - `checks`: link, frontmatter, asset, stale-index checks
+//! - `commit`: commit on save, allowed paths only
+//! - `sync`: fetch, fast-forward, rebase worktrees, push with lease
+//! - `local_changes`: the main clone's dirty state, move to thread, adopt branch
 //!
-//! Providers, sync, conflicts, and agent adapters land in later issues.
+//! Providers, the block-level conflict model, and agent adapters land in later issues.
 
 pub mod checks;
+pub mod commit;
 pub mod frontmatter;
 pub mod index;
+pub mod local_changes;
 pub mod repo;
+pub mod sync;
+#[cfg(test)]
+mod test_support;
 pub mod worktree;
 
 pub use repo::{ProviderKind, RemoteInfo, Repo};
