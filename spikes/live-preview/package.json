@@ -1,0 +1,27 @@
+{
+  "name": "@kmdn/spike-live-preview",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "test": "vitest run",
+    "lint": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@codemirror/commands": "^6",
+    "@codemirror/lang-markdown": "^6",
+    "@codemirror/language": "^6",
+    "@codemirror/language-data": "^6",
+    "@codemirror/state": "^6",
+    "@codemirror/view": "^6",
+    "@lezer/highlight": "^1",
+    "@lezer/markdown": "^1"
+  },
+  "devDependencies": {
+    "jsdom": "^25",
+    "typescript": "^5",
+    "vite": "^6",
+    "vitest": "^3"
+  }
+}

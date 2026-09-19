@@ -1,0 +1,23 @@
+[package]
+name = "kmdn-desktop"
+description = "kmdn desktop app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "kmdn_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+kmdn-core = { path = "../../../crates/kmdn-core" }
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true

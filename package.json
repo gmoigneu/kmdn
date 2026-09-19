@@ -1,0 +1,16 @@
+{
+  "name": "kmdn-workspace",
+  "private": true,
+  "packageManager": "pnpm@10.0.0",
+  "scripts": {
+    "dev": "pnpm --filter @kmdn/desktop dev",
+    "tauri": "pnpm --filter @kmdn/desktop tauri",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}

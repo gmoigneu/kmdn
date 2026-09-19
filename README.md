@@ -4,7 +4,7 @@ Collaborative markdown knowledge base for teams and the agents that work with th
 
 kmdn is a desktop app. A team keeps its knowledge base as plain markdown in a git repository. People edit by hand or by asking an agent. Every change goes through a review that is a normal pull request. Any agent can then read the knowledge base with a plain clone.
 
-Status: design complete, implementation starting. Read [docs/README.md](docs/README.md) for the full design, decisions, and spike plan.
+Status: spikes 1 to 3 passed, core crate and desktop scaffold in place. Read [docs/README.md](docs/README.md) for the full design, decisions, and spike plan.
 
 ## Shape
 

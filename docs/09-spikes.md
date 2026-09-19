@@ -6,12 +6,12 @@ The 15 open questions from the first draft were resolved on 2026-09-18. See D26 
 
 Throwaway code in `spikes/`, one week cap each, run in parallel. Each ends in a short write-up: pass or fail, what was learned, what changes in the plan.
 
-### Spike 1: live preview editor
+### Spike 1: live preview editor (done 2026-09-19, pass, see spikes/live-preview/README.md)
 Goal: CodeMirror 6 buffer rendering GFM in place.
 Pass: headings, emphasis, links, inline images, tables, task lists, fenced code with highlighting, all rendered inline; syntax markers visible only on the active line; frontmatter collapsed; typing latency unnoticeable on a 2,000-line document.
 Decide: build decorations from scratch versus start from an existing open-source live-preview extension.
 
-### Spike 2: rendered diff
+### Spike 2: rendered diff (done 2026-09-19, pass, see spikes/rendered-diff/README.md)
 Goal: two versions of a real document, rendered, aligned by block, word-level highlights in prose, line-level in code and tables.
 Pass: a 50-block document with insertions, deletions, and an edited paragraph renders correctly; a comment can be anchored to a rendered block and mapped to a line number in the new file.
 Decide: own block alignment versus adapting an existing HTML diff tool.
