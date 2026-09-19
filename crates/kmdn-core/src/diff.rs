@@ -115,52 +115,6 @@ pub fn thread_changes(worktree: &Path, base_ref: &str) -> Result<Vec<FileChange>
     Ok(out)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::commit::{allowed_set, commit_allowed, Author, DEFAULT_ALLOWED};
-    use crate::repo::Repo;
-    use crate::test_support::{commit_on_origin, seeded_repo_with_origin};
-
-    #[test]
-    fn lists_committed_and_uncommitted_changes_against_merge_base() {
-        let (_d, root, upstream) = seeded_repo_with_origin();
-        let repo = Repo::open(&root).unwrap();
-        let wt = repo
-            .create_thread_worktree("a", "t", "refs/remotes/origin/main")
-            .unwrap();
-        let allowed = allowed_set(DEFAULT_ALLOWED).unwrap();
-        let author = Author {
-            name: "A".into(),
-            email: "a@x.io".into(),
-        };
-
-        std::fs::write(wt.path.join("README.md"), "# KB\nmore\n").unwrap();
-        std::fs::write(wt.path.join("new.md"), "# New\n").unwrap();
-        commit_allowed(&wt.path, "c1", &author, &allowed).unwrap();
-        std::fs::write(wt.path.join("draft.md"), "# Draft, unsaved to git\n").unwrap();
-
-        // main moves on independently; the diff must stay relative to the merge base
-        commit_on_origin(&upstream, "elsewhere.md", "# E\n", "main e");
-        crate::sync::fetch(repo.git(), "origin", None).unwrap();
-
-        let ch = thread_changes(&wt.path, "refs/remotes/origin/main").unwrap();
-        let paths: Vec<(&str, ChangeStatus)> =
-            ch.iter().map(|c| (c.path.as_str(), c.status)).collect();
-        assert_eq!(
-            paths,
-            vec![
-                ("README.md", ChangeStatus::Modified),
-                ("draft.md", ChangeStatus::Added),
-                ("new.md", ChangeStatus::Added)
-            ]
-        );
-        assert_eq!(ch[0].old.as_deref(), Some("# KB\n"));
-        assert_eq!(ch[0].new.as_deref(), Some("# KB\nmore\n"));
-        assert!(ch[1].old.is_none());
-        assert!(!ch.iter().any(|c| c.path == "elsewhere.md"));
-    }
-}
 
 /// Changes between two commits, e.g. a PR's merge base and head, for the review layout (D48).
 pub fn changes_between(
@@ -250,4 +204,51 @@ pub fn fetch_branch(
     repo.find_reference(&format!("refs/remotes/origin/{branch}"))?
         .target()
         .ok_or_else(|| git2::Error::from_str("branch has no target").into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commit::{allowed_set, commit_allowed, Author, DEFAULT_ALLOWED};
+    use crate::repo::Repo;
+    use crate::test_support::{commit_on_origin, seeded_repo_with_origin};
+
+    #[test]
+    fn lists_committed_and_uncommitted_changes_against_merge_base() {
+        let (_d, root, upstream) = seeded_repo_with_origin();
+        let repo = Repo::open(&root).unwrap();
+        let wt = repo
+            .create_thread_worktree("a", "t", "refs/remotes/origin/main")
+            .unwrap();
+        let allowed = allowed_set(DEFAULT_ALLOWED).unwrap();
+        let author = Author {
+            name: "A".into(),
+            email: "a@x.io".into(),
+        };
+
+        std::fs::write(wt.path.join("README.md"), "# KB\nmore\n").unwrap();
+        std::fs::write(wt.path.join("new.md"), "# New\n").unwrap();
+        commit_allowed(&wt.path, "c1", &author, &allowed).unwrap();
+        std::fs::write(wt.path.join("draft.md"), "# Draft, unsaved to git\n").unwrap();
+
+        // main moves on independently; the diff must stay relative to the merge base
+        commit_on_origin(&upstream, "elsewhere.md", "# E\n", "main e");
+        crate::sync::fetch(repo.git(), "origin", None).unwrap();
+
+        let ch = thread_changes(&wt.path, "refs/remotes/origin/main").unwrap();
+        let paths: Vec<(&str, ChangeStatus)> =
+            ch.iter().map(|c| (c.path.as_str(), c.status)).collect();
+        assert_eq!(
+            paths,
+            vec![
+                ("README.md", ChangeStatus::Modified),
+                ("draft.md", ChangeStatus::Added),
+                ("new.md", ChangeStatus::Added)
+            ]
+        );
+        assert_eq!(ch[0].old.as_deref(), Some("# KB\n"));
+        assert_eq!(ch[0].new.as_deref(), Some("# KB\nmore\n"));
+        assert!(ch[1].old.is_none());
+        assert!(!ch.iter().any(|c| c.path == "elsewhere.md"));
+    }
 }
