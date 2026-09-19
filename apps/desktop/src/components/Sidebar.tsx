@@ -1,5 +1,6 @@
-import { useQuery } from "@tanstack/react-query";
-import { FileText, GitPullRequest, Layers, PanelLeft, Search } from "lucide-react";
+import { useEffect } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { FileText, GitPullRequest, HardDrive, Layers, PanelLeft, RefreshCw, Search } from "lucide-react";
 import { api } from "@/lib/api";
 import { useUi } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -17,11 +18,51 @@ function Section({ title, icon: Icon, count, children }: { title: string; icon: 
   );
 }
 
+/** Fetch, fast-forward, rebase (D31): on focus and every 60s, backing off when unfocused. */
+function useSyncLoop(root: string) {
+  const qc = useQueryClient();
+  const sync = useMutation({
+    mutationFn: () => api.syncNow(root),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["threads", root] });
+      qc.invalidateQueries({ queryKey: ["docs", root] });
+      qc.invalidateQueries({ queryKey: ["local", root] });
+      qc.invalidateQueries({ queryKey: ["changes", root] });
+    },
+  });
+  useEffect(() => {
+    let interval = 60_000;
+    let timer: ReturnType<typeof setTimeout>;
+    let unfocusedSince: number | null = null;
+    const tick = () => {
+      if (unfocusedSince && Date.now() - unfocusedSince > 10 * 60_000) interval = 5 * 60_000;
+      sync.mutate();
+      timer = setTimeout(tick, interval);
+    };
+    const onFocus = () => { unfocusedSince = null; interval = 60_000; clearTimeout(timer); tick(); };
+    const onBlur = () => { unfocusedSince = Date.now(); };
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("blur", onBlur);
+    timer = setTimeout(tick, 2_000);
+    return () => { clearTimeout(timer); window.removeEventListener("focus", onFocus); window.removeEventListener("blur", onBlur); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [root]);
+  return sync;
+}
+
 export function Sidebar() {
   const { kb, view, go, sidebarCollapsed, toggleSidebar } = useUi();
   const root = kb!.root;
+  const qc = useQueryClient();
   const threads = useQuery({ queryKey: ["threads", root], queryFn: () => api.listThreads(root) });
   const docs = useQuery({ queryKey: ["docs", root], queryFn: () => api.listDocuments(root) });
+  const local = useQuery({ queryKey: ["local", root], queryFn: () => api.localChanges(root), refetchInterval: 5_000 });
+  const sync = useSyncLoop(root);
+  const move = useMutation({
+    mutationFn: () => api.moveLocalChangesToThread(root, "local-changes"),
+    onSuccess: (t) => { qc.invalidateQueries({ queryKey: ["threads", root] }); qc.invalidateQueries({ queryKey: ["local", root] }); go({ kind: "thread", slug: t.slug }); },
+  });
+  const hasLocal = local.data && (local.data.dirty_paths.length > 0 || local.data.foreign_branch || local.data.operation_in_progress);
 
   if (sidebarCollapsed) {
     return (
@@ -36,9 +77,12 @@ export function Sidebar() {
 
   return (
     <aside className="w-64 shrink-0 border-r border-border bg-bg-muted flex flex-col overflow-hidden">
-      <div className="flex items-center gap-2 px-3 h-11 border-b border-border">
+      <div className="flex items-center gap-1 px-3 h-11 border-b border-border">
         <button onClick={() => go({ kind: "home" })} className="font-medium truncate flex-1 text-left">
           {kb!.config.name ?? kb!.remote?.name ?? "Knowledge base"}
+        </button>
+        <button title={sync.isPending ? "Syncing…" : "Sync now"} onClick={() => sync.mutate()} className="p-1 rounded-md hover:bg-bg-elevated text-fg-muted">
+          <RefreshCw size={14} className={cn(sync.isPending && "animate-spin")} />
         </button>
         <button title="Collapse sidebar" onClick={toggleSidebar} className="p-1 rounded-md hover:bg-bg-elevated text-fg-muted"><PanelLeft size={14} /></button>
       </div>
@@ -48,7 +92,20 @@ export function Sidebar() {
         </div>
       </div>
       <div className="flex-1 overflow-y-auto pb-4">
-        <Section title="Threads" icon={Layers} count={threads.data?.length}>
+        <Section title="Threads" icon={Layers} count={(threads.data?.length ?? 0) + (hasLocal ? 1 : 0)}>
+          {hasLocal && (
+            <div className="px-2 py-1.5 rounded-md border border-dashed border-border mb-1">
+              <div className="flex items-center gap-2 text-xs"><HardDrive size={12} className="text-fg-muted" /><span className="flex-1">Local changes</span><span className="text-[10px] text-fg-muted">read-only</span></div>
+              <div className="text-[11px] text-fg-muted mt-0.5">
+                {local.data!.foreign_branch ? `on ${local.data!.foreign_branch}` : `${local.data!.dirty_paths.length} file(s) changed in the clone`}
+                {local.data!.operation_in_progress && `, ${local.data!.operation_in_progress} in progress`}
+              </div>
+              {!local.data!.foreign_branch && !local.data!.operation_in_progress && (
+                <button onClick={() => move.mutate()} disabled={move.isPending} className="mt-1.5 h-6 px-2 rounded-md border border-border text-[11px] hover:bg-bg-elevated disabled:opacity-40">Move to new thread</button>
+              )}
+              {move.error && <p className="text-danger text-[11px] mt-1">{String(move.error)}</p>}
+            </div>
+          )}
           {threads.data?.length ? threads.data.map((t) => (
             <button key={t.slug} onClick={() => go({ kind: "thread", slug: t.slug })}
               className={cn("w-full text-left px-2 py-1 rounded-md truncate hover:bg-bg-elevated flex items-center gap-2",
@@ -57,10 +114,10 @@ export function Sidebar() {
               <span className="truncate">{t.slug}</span>
               <span className="ml-auto text-[10px] px-1.5 rounded-full border border-border text-fg-muted">draft</span>
             </button>
-          )) : <div className="px-2 text-xs text-fg-muted">No threads yet.</div>}
+          )) : !hasLocal && <div className="px-2 text-xs text-fg-muted">No threads yet.</div>}
         </Section>
         <Section title="Reviews" icon={GitPullRequest} count={0}>
-          <div className="px-2 text-xs text-fg-muted">Connect a provider to see reviews.</div>
+          <div className="px-2 text-xs text-fg-muted">Connect a provider to see reviews (#12).</div>
         </Section>
         <Section title="Documents" icon={FileText} count={docs.data?.length}>
           {docs.data?.map((d) => (

@@ -13,7 +13,7 @@ export function Home() {
   const [mode, setMode] = useState<"suggest" | "edit">("edit");
   const threads = useQuery({ queryKey: ["threads", root], queryFn: () => api.listThreads(root) });
   const create = useMutation({
-    mutationFn: (slug: string) => api.createThread(root, "me", slug),
+    mutationFn: (slug: string) => api.createThread(root, slug),
     onSuccess: (t) => { qc.invalidateQueries({ queryKey: ["threads", root] }); setText(""); go({ kind: "thread", slug: t.slug }); },
   });
 

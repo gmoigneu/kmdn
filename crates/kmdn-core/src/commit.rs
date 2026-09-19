@@ -5,6 +5,7 @@ use std::path::Path;
 
 use git2::{IndexAddOption, Oid, Repository, Signature};
 use globset::{Glob, GlobSet, GlobSetBuilder};
+use serde::{Deserialize, Serialize};
 
 use crate::repo::RepoError;
 
@@ -18,7 +19,7 @@ pub fn allowed_set(globs: &[&str]) -> Result<GlobSet, globset::Error> {
     b.build()
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Author {
     pub name: String,
     pub email: String,

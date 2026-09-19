@@ -6,6 +6,7 @@
 //! - `index`: frontmatter, document tree, AGENTS.md generation
 //! - `checks`: link, frontmatter, asset, stale-index checks
 //! - `commit`: commit on save, allowed paths only
+//! - `diff`: a thread's changes versus the default branch, with old and new text
 //! - `sync`: fetch, fast-forward, rebase worktrees, push with lease
 //! - `local_changes`: the main clone's dirty state, move to thread, adopt branch
 //!
@@ -13,6 +14,7 @@
 
 pub mod checks;
 pub mod commit;
+pub mod diff;
 pub mod frontmatter;
 pub mod index;
 pub mod local_changes;
