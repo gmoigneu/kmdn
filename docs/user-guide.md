@@ -213,7 +213,7 @@ While the agent works the timeline fills in:
 
 ![An agent turn with tool calls refused by the policy](screenshots/30-agent-done.webp)
 
-In the screenshot the agent is Codex in Edit mode. Codex reads files through shell commands, so each of those is refused with the reason "shell is disabled outside Developer mode", and the agent falls back to proposing the text in its reply. Claude Code and pi expose separate read and write tools, which map onto the policy's read and write permissions, so their edits go through in Edit mode. When an agent edits a file, the Changes tab and the editor refresh as soon as the turn ends.
+In the screenshot the agent is Codex in Edit mode, captured before read-only commands were allowed: each `cat` and `find` was refused as shell and the agent fell back to proposing the text in its reply. Today kmdn recognises read-only commands (`cat`, `head`, `rg`, `ls`, `find` without actions, `sed -n` with a print range, `git status`, `git log`, `git diff` and similar) and approves them as reads; anything with pipes, redirections, or a program outside that short list is still refused outside Developer mode. Claude Code and pi expose separate read and write tools that map onto the same permissions. When an agent edits a file, the Changes tab and the editor refresh as soon as the turn ends.
 
 kmdn sends an OS notification when an agent needs your approval or finishes while the window is not focused, and when a new review appears that you did not author.
 
@@ -332,7 +332,7 @@ kmdn-cli init --name "Team handbook" --path /path/to/empty/folder
 
 ## Known limitations
 
-- **Codex in Edit mode** can only propose changes. It reads files through shell commands, and the policy refuses shell outside Developer mode. Claude Code and pi are not affected.
+- **Codex** runs plain read-only commands as reads, but a compound command (pipes, redirections, `&&`) or an unlisted program is refused outside Developer mode, so Codex sometimes has to rephrase how it looks at a file.
 - When an agent cannot reach its model (for example an expired login), the turn ends with the provider's error in the timeline and no changes.
 
 ## Not in this version
