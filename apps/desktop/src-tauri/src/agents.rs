@@ -303,8 +303,6 @@ impl Runtime {
 
     pub async fn send(&self, slug: &str, text: &str) -> Result<(), String> {
         let s = self.get(slug)?;
-        s.log.lock().unwrap().user(s.kind, text);
-        s.append_transcript(&serde_json::json!({ "user": text }));
         let line = match s.kind {
             AgentKind::Claude => agents::claude::user_message(text),
             AgentKind::Codex => {
@@ -336,6 +334,10 @@ impl Runtime {
                 agents::pi::prompt(&ctx, &format!("p{n}"))
             }
         };
+        // Logged only once the message can actually go out, so a prompt that never reached the
+        // agent does not end up in the condensed log posted to the pull request.
+        s.log.lock().unwrap().user(s.kind, text);
+        s.append_transcript(&serde_json::json!({ "user": text }));
         s.write_line(&line).await
     }
 

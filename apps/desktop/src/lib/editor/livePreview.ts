@@ -5,7 +5,7 @@
 // Images become widgets. Frontmatter collapses to a one-line widget unless the cursor is inside.
 
 import { Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate, WidgetType } from "@codemirror/view";
-import { EditorState, RangeSetBuilder, Extension, StateField } from "@codemirror/state";
+import { EditorState, RangeSetBuilder, Extension, StateField, Text } from "@codemirror/state";
 import { syntaxTree } from "@codemirror/language";
 import { SyntaxNodeRef } from "@lezer/common";
 
@@ -41,11 +41,17 @@ const MARKS = new Set(["HeaderMark", "EmphasisMark", "CodeMark", "LinkMark", "Qu
 
 /** Frontmatter range if the doc starts with a `---` fence. Returns [from, to] covering the block. */
 export function frontmatterRange(doc: string): [number, number] | null {
-  if (!doc.startsWith("---\n")) return null;
-  const end = doc.indexOf("\n---", 3);
-  if (end < 0) return null;
-  const lineEnd = doc.indexOf("\n", end + 1);
-  return [0, lineEnd < 0 ? doc.length : lineEnd];
+  return frontmatterRangeOf(Text.of(doc.split("\n")));
+}
+
+/** Same on a CodeMirror document, walking lines from the top so it never copies the whole text. */
+export function frontmatterRangeOf(doc: Text): [number, number] | null {
+  if (doc.lines < 2 || doc.line(1).text !== "---") return null;
+  for (let i = 2; i <= doc.lines; i++) {
+    const line = doc.line(i);
+    if (line.text.startsWith("---")) return [0, line.to];
+  }
+  return null;
 }
 
 function activeLines(view: EditorView): Set<number> {
@@ -70,7 +76,7 @@ export function buildDecorations(view: EditorView): DecorationSet {
 
   // Frontmatter: the collapsed block widget lives in `frontmatterField` (block decorations may not
   // come from a view plugin). Here we only style the raw lines while the cursor is inside.
-  const fm = frontmatterRange(state.doc.toString());
+  const fm = frontmatterRangeOf(state.doc);
   const fmActive = fm ? isActive(fm[0], fm[1]) : false;
   if (fm && fmActive) {
     for (let l = state.doc.lineAt(fm[0]).number; l <= state.doc.lineAt(fm[1]).number; l++) {
@@ -127,7 +133,7 @@ export function buildDecorations(view: EditorView): DecorationSet {
       },
     });
   }
-  ranges.sort((a, b) => a.from - b.from || (a.deco.spec.block ? -1 : 0) || startSideOf(a.deco) - startSideOf(b.deco));
+  ranges.sort((a, b) => a.from - b.from || startSideOf(a.deco) - startSideOf(b.deco));
   const b = new RangeSetBuilder<Decoration>();
   for (const r of ranges) b.add(r.from, r.to, r.deco);
   return b.finish();
@@ -137,7 +143,7 @@ function startSideOf(d: Decoration) { return (d as any).startSide ?? 0; }
 /** Collapsed frontmatter as a block widget, unless the selection touches it. State-provided because
  * CodeMirror rejects block decorations from view plugins ("Block decorations may not be specified via plugins"). */
 function frontmatterCollapse(state: EditorState): DecorationSet {
-  const fm = frontmatterRange(state.doc.toString());
+  const fm = frontmatterRangeOf(state.doc);
   if (!fm) return Decoration.none;
   const first = state.doc.lineAt(fm[0]).number, last = state.doc.lineAt(fm[1]).number;
   for (const r of state.selection.ranges) {
