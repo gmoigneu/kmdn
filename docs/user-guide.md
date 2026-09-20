@@ -215,8 +215,6 @@ Codex is the special case, because it has no separate read tool: it looks at fil
 
 ![Codex reading and editing a document](screenshots/30-agent-done.webp)
 
-![The agent's edit in the Changes tab](screenshots/31-agent-changes.webp)
-
 kmdn sends an OS notification when an agent needs your approval or finishes while the window is not focused, and when a new review appears that you did not author. When an agent cannot reach its model, for example because a login expired, the provider's error shows up in the timeline instead of silence.
 
 ## Sync, local changes, and conflicts
