@@ -20,11 +20,11 @@ function toolLabel(t: ToolKind) {
   return typeof t === "string" ? t : t.other;
 }
 
-export function AgentPanel({ root, slug, branch, onChanged }: { root: string; slug: string; branch: string; onChanged: () => void }) {
+export function AgentPanel({ root, slug, branch, initialMode, onChanged }: { root: string; slug: string; branch: string; initialMode?: AgentMode; onChanged: () => void }) {
   const detected = useQuery({ queryKey: ["agents"], queryFn: api.agentDetect, staleTime: 60_000 });
   const session = useQuery({ queryKey: ["agent-session", slug], queryFn: () => api.agentSession(slug) });
   const [kind, setKind] = useState<AgentKind>("claude");
-  const [mode, setMode] = useState<AgentMode>("edit");
+  const [mode, setMode] = useState<AgentMode>(initialMode ?? "edit");
   const [text, setText] = useState("");
   const [items, setItems] = useState<Item[]>([]);
   const [busy, setBusy] = useState(false);
