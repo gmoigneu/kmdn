@@ -84,8 +84,12 @@ impl Repo {
         Ok(ThreadWorktree { slug, branch, path })
     }
 
+    /// Every thread worktree: branches with the `kmdn/` prefix, plus adopted branches (D45),
+    /// which keep their own name but live in kmdn's worktree directory.
     pub fn list_thread_worktrees(&self) -> Result<Vec<ThreadWorktree>, RepoError> {
         let git = self.git();
+        let dir = worktrees_dir(self.root());
+        let dir = dir.canonicalize().unwrap_or(dir);
         let mut out = Vec::new();
         for name in git.worktrees()?.iter().flatten() {
             let wt = git.find_worktree(name)?;
@@ -98,7 +102,11 @@ impl Repo {
                         .and_then(|h| h.shorthand().map(str::to_string))
                 })
                 .unwrap_or_default();
-            if branch.starts_with(BRANCH_PREFIX) {
+            let in_kmdn_dir = path
+                .parent()
+                .map(|p| p.canonicalize().unwrap_or_else(|_| p.to_path_buf()) == dir)
+                .unwrap_or(false);
+            if branch.starts_with(BRANCH_PREFIX) || in_kmdn_dir {
                 out.push(ThreadWorktree {
                     slug: name.to_string(),
                     branch,
@@ -109,7 +117,8 @@ impl Repo {
         Ok(out)
     }
 
-    /// Removes the worktree directory and its branch. `force` discards uncommitted work.
+    /// Removes the worktree directory and, for `kmdn/` branches, the branch. Adopted branches
+    /// belong to the user and are kept. `force` discards uncommitted work.
     pub fn remove_thread_worktree(&self, slug: &str, force: bool) -> Result<(), RepoError> {
         let git = self.git();
         let wt = git.find_worktree(slug)?;
@@ -133,7 +142,7 @@ impl Repo {
         let mut po = git2::WorktreePruneOptions::new();
         po.valid(true).working_tree(true);
         wt.prune(Some(&mut po))?;
-        if let Some(b) = branch {
+        if let Some(b) = branch.filter(|b| b.starts_with(BRANCH_PREFIX)) {
             if let Ok(mut br) = git.find_branch(&b, BranchType::Local) {
                 br.delete()?;
             }

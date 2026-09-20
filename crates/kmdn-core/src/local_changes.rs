@@ -155,10 +155,18 @@ mod tests {
         let wt = adopt_branch(&repo, "feature/docs-refresh").unwrap();
         assert_eq!(wt.branch, "feature/docs-refresh");
         assert!(wt.path.join("README.md").exists());
-        assert_eq!(
-            repo.list_thread_worktrees().unwrap().len(),
-            0,
-            "foreign branches are not kmdn/ threads in the list"
-        );
+        // The adopted branch is a thread like any other, under its own name (D45).
+        let listed = repo.list_thread_worktrees().unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].branch, "feature/docs-refresh");
+        assert_eq!(listed[0].slug, wt.slug);
+        // Abandoning it removes the worktree but keeps the user's branch.
+        repo.remove_thread_worktree(&wt.slug, true).unwrap();
+        assert!(!wt.path.exists());
+        assert!(repo
+            .git()
+            .find_branch("feature/docs-refresh", git2::BranchType::Local)
+            .is_ok());
+        assert!(repo.list_thread_worktrees().unwrap().is_empty());
     }
 }
