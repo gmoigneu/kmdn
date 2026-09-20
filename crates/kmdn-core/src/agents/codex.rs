@@ -19,6 +19,178 @@ pub struct CodexState {
     pub turn_id: Option<String>,
 }
 
+/// Splits a command line into words, honouring single and double quotes and backslashes.
+/// Enough for the argv Codex reports; it is not a shell.
+fn shell_words(s: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut in_word = false;
+    let mut quote: Option<char> = None;
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        match quote {
+            Some(q) if c == q => quote = None,
+            Some('\'') => cur.push(c),
+            Some(_) => {
+                if c == '\\' {
+                    if let Some(n) = chars.next() {
+                        cur.push(n);
+                    }
+                } else {
+                    cur.push(c);
+                }
+            }
+            None => match c {
+                '\'' | '"' => {
+                    quote = Some(c);
+                    in_word = true;
+                }
+                '\\' => {
+                    if let Some(n) = chars.next() {
+                        cur.push(n);
+                        in_word = true;
+                    }
+                }
+                c if c.is_whitespace() => {
+                    if in_word {
+                        out.push(std::mem::take(&mut cur));
+                        in_word = false;
+                    }
+                }
+                _ => {
+                    cur.push(c);
+                    in_word = true;
+                }
+            },
+        }
+    }
+    if in_word {
+        out.push(cur);
+    }
+    out
+}
+
+fn basename(w: &str) -> &str {
+    w.rsplit('/').next().unwrap_or(w)
+}
+
+/// Commands that only read. No pagers, no filters that take an output file, nothing that can
+/// run other programs. Redirections and pipes are rejected before we get here.
+const READ_ONLY: &[&str] = &[
+    "cat", "head", "tail", "wc", "ls", "rg", "grep", "egrep", "fgrep", "stat", "file", "du", "pwd",
+    "echo", "printf", "basename", "dirname", "realpath", "which", "nl", "cut", "date", "whoami",
+    "uname", "read", "test",
+];
+
+fn git_read_only(args: &[String]) -> bool {
+    let mut it = args.iter();
+    let mut sub = None;
+    while let Some(a) = it.next() {
+        if a == "-C" || a == "--git-dir" || a == "--work-tree" {
+            it.next();
+        } else if !a.starts_with('-') {
+            sub = Some(a.as_str());
+            break;
+        }
+    }
+    let rest: Vec<&String> = it.collect();
+    match sub {
+        Some(
+            "status" | "log" | "diff" | "show" | "rev-parse" | "ls-files" | "ls-tree" | "blame"
+            | "grep" | "describe" | "shortlog" | "cat-file",
+        ) => !rest.iter().any(|a| a.starts_with("--output")),
+        Some("branch") => rest.iter().all(|a| {
+            matches!(
+                a.as_str(),
+                "--show-current" | "--list" | "-a" | "-r" | "-v" | "-vv" | "--all"
+            )
+        }),
+        Some("tag") => rest
+            .iter()
+            .all(|a| matches!(a.as_str(), "--list" | "-l" | "-n")),
+        Some("remote") => rest.iter().all(|a| a.as_str() == "-v"),
+        _ => false,
+    }
+}
+
+/// `sed -n '<range>p' file...` only: `-e`, `-f`, `-i`, and any script that is not a plain
+/// print range are refused, because sed scripts can write files.
+fn sed_read_only(args: &[String]) -> bool {
+    if !args.iter().any(|a| a == "-n") || args.iter().any(|a| a.starts_with('-') && a != "-n") {
+        return false;
+    }
+    args.iter()
+        .find(|a| a.as_str() != "-n")
+        .map(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit() || ",$p;".contains(c)))
+        .unwrap_or(false)
+}
+
+/// Read-only shell commands count as reads (D15 keeps real shell behind Developer mode).
+/// Codex has no separate read tool: `cat`, `rg`, `git status` and friends are how it looks at
+/// documents, and refusing them left it unable to work in Edit mode. Anything with pipes,
+/// redirections, substitutions, several commands, or a tool outside a short allowlist stays
+/// `Shell`. Transparent wrappers (`sh -c`, `command`, `rtk proxy`) are unwrapped first.
+pub fn command_kind(cmd: &str) -> ToolKind {
+    let meta = |s: &str| s.chars().any(|c| "|;&<>`$\n".contains(c));
+    let mut words = shell_words(cmd);
+    let is_shell = |w: &str| matches!(basename(w), "sh" | "bash" | "zsh" | "dash");
+    if words.len() == 3
+        && is_shell(&words[0])
+        && words[1].starts_with('-')
+        && words[1].contains('c')
+        && words[1][1..].chars().all(|c| c == 'l' || c == 'c')
+    {
+        if meta(&words[2]) {
+            return ToolKind::Shell;
+        }
+        words = shell_words(&words[2]);
+    } else if meta(cmd) {
+        return ToolKind::Shell;
+    }
+    loop {
+        match words.first().map(|w| basename(w)) {
+            Some("command") | Some("exec") => {
+                words.remove(0);
+            }
+            Some("rtk") if words.get(1).map(String::as_str) == Some("proxy") => {
+                words.drain(0..2);
+            }
+            Some("rtk") => {
+                words.remove(0);
+            }
+            _ => break,
+        }
+    }
+    let Some(first) = words.first() else {
+        return ToolKind::Shell;
+    };
+    let args = &words[1..];
+    let read_only = match basename(first) {
+        "git" => git_read_only(args),
+        "sed" => sed_read_only(args),
+        "find" => !args.iter().any(|a| {
+            matches!(
+                a.as_str(),
+                "-delete"
+                    | "-exec"
+                    | "-execdir"
+                    | "-ok"
+                    | "-okdir"
+                    | "-fprint"
+                    | "-fprintf"
+                    | "-fls"
+            )
+        }),
+        "rg" => !args.iter().any(|a| a.starts_with("--pre")),
+        n => READ_ONLY.contains(&n),
+    };
+    if read_only {
+        ToolKind::Read
+    } else {
+        ToolKind::Shell
+    }
+}
+
 impl CodexState {
     fn id(&mut self) -> u64 {
         self.next_id += 1;
@@ -155,11 +327,12 @@ impl CodexState {
                             .get("command")
                             .and_then(Value::as_str)
                             .map(str::to_string);
+                        let kind = cmd.as_deref().map(command_kind).unwrap_or(ToolKind::Shell);
                         self.items
-                            .insert(id.clone(), (ToolKind::Shell, vec![], cmd.clone()));
+                            .insert(id.clone(), (kind.clone(), vec![], cmd.clone()));
                         out.push(AgentEvent::ToolCallStarted {
                             id,
-                            kind: ToolKind::Shell,
+                            kind,
                             paths: vec![],
                             command: cmd,
                         });
@@ -233,14 +406,12 @@ impl CodexState {
                 let (kind, paths, command) =
                     self.items.get(&item_id).cloned().unwrap_or_else(|| {
                         if method.contains("command") {
-                            (
-                                ToolKind::Shell,
-                                vec![],
-                                params
-                                    .get("command")
-                                    .and_then(Value::as_str)
-                                    .map(str::to_string),
-                            )
+                            let cmd = params
+                                .get("command")
+                                .and_then(Value::as_str)
+                                .map(str::to_string);
+                            let kind = cmd.as_deref().map(command_kind).unwrap_or(ToolKind::Shell);
+                            (kind, vec![], cmd)
                         } else {
                             (ToolKind::Write, vec![], None)
                         }
@@ -326,6 +497,45 @@ mod tests {
         let r: Value = serde_json::from_str(&st.approval_response("0", false)).unwrap();
         assert_eq!(r["id"], json!(0));
         assert_eq!(r["result"]["decision"], json!("decline"));
+    }
+
+    #[test]
+    fn read_only_commands_are_reads_everything_else_is_shell() {
+        let read = [
+            "/bin/zsh -lc 'cat engineering/deploy.md'",
+            "/bin/zsh -lc 'rtk proxy cat engineering/deploy.md'",
+            "/bin/zsh -lc 'rtk read engineering/deploy.md'",
+            "bash -lc \"rg -n 'rollback' .\"",
+            "/bin/zsh -lc 'sed -n 1,80p README.md'",
+            "/bin/zsh -lc 'git status --short'",
+            "/bin/zsh -lc 'git -C . log --oneline -5'",
+            "/bin/zsh -lc 'find . -name AGENTS.md -print'",
+            "ls -la engineering",
+            "/bin/zsh -lc 'head -n 20 people/time-off.md'",
+        ];
+        for c in read {
+            assert_eq!(command_kind(c), ToolKind::Read, "{c}");
+        }
+        let shell = [
+            "/bin/zsh -lc 'cat a.md > b.md'",
+            "/bin/zsh -lc 'cat a.md | grep x'",
+            "/bin/zsh -lc 'rm -rf engineering'",
+            "/bin/zsh -lc 'find . -name \"*.md\" -delete'",
+            "/bin/zsh -lc 'sed -i s/a/b/ README.md'",
+            "/bin/zsh -lc 'sed -n \"s/a/b/w out\" README.md'",
+            "/bin/zsh -lc 'git push origin main'",
+            "/bin/zsh -lc 'git branch -D main'",
+            "/bin/zsh -lc 'git diff --output=x.patch'",
+            "/bin/zsh -lc 'python3 -c print(1)'",
+            "/bin/zsh -lc 'rg --pre cat foo'",
+            "/bin/zsh -lc 'echo $(whoami)'",
+            "/bin/zsh -lc 'cat a.md; rm a.md'",
+            "/bin/zsh -lc 'rtk gain'",
+            "",
+        ];
+        for c in shell {
+            assert_eq!(command_kind(c), ToolKind::Shell, "{c}");
+        }
     }
 
     #[test]
