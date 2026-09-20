@@ -1,5 +1,5 @@
 // Read view: GFM rendered with the same block renderer used by the diff (D17: one parser everywhere).
-import { useMemo } from "react";
+import { Fragment, useMemo } from "react";
 import { marked } from "marked";
 import { splitBlocks } from "@/lib/rdiff/blocks";
 import { cn } from "@/lib/utils";
@@ -22,7 +22,7 @@ export function RenderedMarkdown({ text, className }: { text: string; className?
     <article className={cn("prose-pane", className)}>
       {keys.length > 0 && (
         <dl className="mb-6 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs text-fg-muted border border-border rounded-md p-3">
-          {keys.map(([k, v]) => (<><dt key={`k-${k}`} className="font-mono">{k}</dt><dd key={`v-${k}`} className="text-fg">{v}</dd></>))}
+          {keys.map(([k, v], i) => (<Fragment key={`${k}-${i}`}><dt className="font-mono">{k}</dt><dd className="text-fg">{v}</dd></Fragment>))}
         </dl>
       )}
       <div className="rendered" dangerouslySetInnerHTML={{ __html: html }} />
