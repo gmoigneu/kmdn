@@ -98,7 +98,11 @@ fn git_read_only(args: &[String]) -> bool {
         Some(
             "status" | "log" | "diff" | "show" | "rev-parse" | "ls-files" | "ls-tree" | "blame"
             | "grep" | "describe" | "shortlog" | "cat-file",
-        ) => !rest.iter().any(|a| a.starts_with("--output")),
+        ) => !rest.iter().any(|a| {
+            a.starts_with("--output")
+                || a.starts_with("-O")
+                || a.starts_with("--open-files-in-pager")
+        }),
         Some("branch") => rest.iter().all(|a| {
             matches!(
                 a.as_str(),
@@ -125,13 +129,64 @@ fn sed_read_only(args: &[String]) -> bool {
         .unwrap_or(false)
 }
 
+/// Shell syntax we refuse to reason about: pipes, redirections, separators, subshells,
+/// expansions. Single quotes protect their content (so `sed -n '1,$p'` is fine); double quotes
+/// still expand `$` and backticks. Unbalanced quotes and a trailing backslash count as meta.
+fn has_shell_meta(s: &str) -> bool {
+    let mut quote: Option<char> = None;
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        match quote {
+            Some('\'') => {
+                if c == '\'' {
+                    quote = None;
+                }
+            }
+            Some(_) => match c {
+                '"' => quote = None,
+                '\\' => {
+                    if chars.next().is_none() {
+                        return true;
+                    }
+                }
+                '$' | '`' => return true,
+                _ => {}
+            },
+            None => match c {
+                '\'' | '"' => quote = Some(c),
+                '\\' => {
+                    if chars.next().is_none() {
+                        return true;
+                    }
+                }
+                '|' | ';' | '&' | '<' | '>' | '`' | '$' | '(' | ')' | '\n' => return true,
+                _ => {}
+            },
+        }
+    }
+    quote.is_some()
+}
+
+/// Reads stay inside the worktree: no absolute paths, no `~`, no `..` segments, also in the
+/// value part of `--flag=value`.
+fn leaves_worktree(args: &[String]) -> bool {
+    args.iter().any(|a| {
+        let v = if a.starts_with('-') {
+            a.split_once('=').map(|(_, v)| v).unwrap_or("")
+        } else {
+            a.as_str()
+        };
+        v.starts_with('/') || v.starts_with('~') || v.split('/').any(|seg| seg == "..")
+    })
+}
+
 /// Read-only shell commands count as reads (D15 keeps real shell behind Developer mode).
 /// Codex has no separate read tool: `cat`, `rg`, `git status` and friends are how it looks at
 /// documents, and refusing them left it unable to work in Edit mode. Anything with pipes,
 /// redirections, substitutions, several commands, or a tool outside a short allowlist stays
-/// `Shell`. Transparent wrappers (`sh -c`, `command`, `rtk proxy`) are unwrapped first.
+/// `Shell`, and so does any read that points outside the worktree. Transparent wrappers
+/// (`sh -c`, `command`, `rtk proxy`) are unwrapped first.
 pub fn command_kind(cmd: &str) -> ToolKind {
-    let meta = |s: &str| s.chars().any(|c| "|;&<>`$\n".contains(c));
     let mut words = shell_words(cmd);
     let is_shell = |w: &str| matches!(basename(w), "sh" | "bash" | "zsh" | "dash");
     if words.len() == 3
@@ -140,11 +195,11 @@ pub fn command_kind(cmd: &str) -> ToolKind {
         && words[1].contains('c')
         && words[1][1..].chars().all(|c| c == 'l' || c == 'c')
     {
-        if meta(&words[2]) {
+        if has_shell_meta(&words[2]) {
             return ToolKind::Shell;
         }
         words = shell_words(&words[2]);
-    } else if meta(cmd) {
+    } else if has_shell_meta(cmd) {
         return ToolKind::Shell;
     }
     loop {
@@ -165,6 +220,9 @@ pub fn command_kind(cmd: &str) -> ToolKind {
         return ToolKind::Shell;
     };
     let args = &words[1..];
+    if leaves_worktree(args) {
+        return ToolKind::Shell;
+    }
     let read_only = match basename(first) {
         "git" => git_read_only(args),
         "sed" => sed_read_only(args),
@@ -178,6 +236,7 @@ pub fn command_kind(cmd: &str) -> ToolKind {
                     | "-okdir"
                     | "-fprint"
                     | "-fprintf"
+                    | "-fprint0"
                     | "-fls"
             )
         }),
@@ -512,6 +571,8 @@ mod tests {
             "/bin/zsh -lc 'find . -name AGENTS.md -print'",
             "ls -la engineering",
             "/bin/zsh -lc 'head -n 20 people/time-off.md'",
+            r#"/bin/zsh -lc "sed -n '1,$p' README.md""#,
+            "/bin/zsh -lc 'git log -3 -- engineering/deploy.md'",
         ];
         for c in read {
             assert_eq!(command_kind(c), ToolKind::Read, "{c}");
@@ -531,6 +592,17 @@ mod tests {
             "/bin/zsh -lc 'echo $(whoami)'",
             "/bin/zsh -lc 'cat a.md; rm a.md'",
             "/bin/zsh -lc 'rtk gain'",
+            "/bin/zsh -lc 'git grep -Oless rollback'",
+            "/bin/zsh -lc 'git grep --open-files-in-pager=vi rollback'",
+            "/bin/zsh -lc 'cat /etc/passwd'",
+            "/bin/zsh -lc 'cat ~/.ssh/id_rsa'",
+            "/bin/zsh -lc 'cat ../secret.md'",
+            "/bin/zsh -lc 'git -C /tmp/elsewhere log'",
+            "/bin/zsh -lc 'grep --file=/etc/passwd x .'",
+            "/bin/zsh -lc 'find . -fprint0 out'",
+            r#"/bin/zsh -lc 'echo "$HOME"'"#,
+            "/bin/zsh -lc '(cat a.md)'",
+            "/bin/zsh -lc 'cat a.md \\'",
             "",
         ];
         for c in shell {
