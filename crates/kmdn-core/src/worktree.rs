@@ -102,6 +102,11 @@ impl Repo {
                         .and_then(|h| h.shorthand().map(str::to_string))
                 })
                 .unwrap_or_default();
+            // A worktree whose directory is gone or whose HEAD cannot be read is a stale git
+            // entry, not a thread; it would only produce a thread that fails on every command.
+            if branch.is_empty() || !path.is_dir() {
+                continue;
+            }
             let in_kmdn_dir = path
                 .parent()
                 .map(|p| p.canonicalize().unwrap_or_else(|_| p.to_path_buf()) == dir)
@@ -232,5 +237,16 @@ mod tests {
         std::fs::write(a.path.join("only-a.md"), "a").unwrap();
         assert!(!b.path.join("only-a.md").exists());
         assert!(!repo.root().join("only-a.md").exists());
+    }
+
+    #[test]
+    fn stale_worktrees_are_not_threads() {
+        let (_d, repo) = seeded_repo();
+        let wt = repo
+            .create_thread_worktree("alice", "gone", "refs/heads/main")
+            .unwrap();
+        assert_eq!(repo.list_thread_worktrees().unwrap().len(), 1);
+        std::fs::remove_dir_all(&wt.path).unwrap();
+        assert!(repo.list_thread_worktrees().unwrap().is_empty());
     }
 }
