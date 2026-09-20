@@ -5,7 +5,7 @@
 // Images become widgets. Frontmatter collapses to a one-line widget unless the cursor is inside.
 
 import { Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate, WidgetType } from "@codemirror/view";
-import { RangeSetBuilder, Extension } from "@codemirror/state";
+import { EditorState, RangeSetBuilder, Extension, StateField } from "@codemirror/state";
 import { syntaxTree } from "@codemirror/language";
 import { SyntaxNodeRef } from "@lezer/common";
 
@@ -68,15 +68,11 @@ export function buildDecorations(view: EditorView): DecorationSet {
   const ranges: { from: number; to: number; deco: Decoration }[] = [];
   const push = (from: number, to: number, deco: Decoration) => ranges.push({ from, to, deco });
 
-  // Frontmatter: collapse unless cursor inside.
+  // Frontmatter: the collapsed block widget lives in `frontmatterField` (block decorations may not
+  // come from a view plugin). Here we only style the raw lines while the cursor is inside.
   const fm = frontmatterRange(state.doc.toString());
   const fmActive = fm ? isActive(fm[0], fm[1]) : false;
-  if (fm && !fmActive) {
-    const body = state.doc.sliceString(4, Math.max(4, fm[1] - 4));
-    const title = /^title:\s*(.+)$/m.exec(body)?.[1]?.trim();
-    const keys = body.split("\n").map((l) => l.split(":")[0].trim()).filter((k) => k && !k.startsWith("#"));
-    push(fm[0], fm[1], Decoration.replace({ widget: new FrontmatterWidget(title ? `${title} · ${keys.length} properties` : `${keys.length} properties`), block: true }));
-  } else if (fm) {
+  if (fm && fmActive) {
     for (let l = state.doc.lineAt(fm[0]).number; l <= state.doc.lineAt(fm[1]).number; l++) {
       const line = state.doc.line(l); push(line.from, line.from, lineCls("cm-lp-fm"));
     }
@@ -138,9 +134,34 @@ export function buildDecorations(view: EditorView): DecorationSet {
 }
 function startSideOf(d: Decoration) { return (d as any).startSide ?? 0; }
 
-export const livePreview: Extension = ViewPlugin.fromClass(class {
-  decorations: DecorationSet;
-  constructor(view: EditorView) { this.decorations = buildDecorations(view); }
-  update(u: ViewUpdate) { if (u.docChanged || u.viewportChanged || u.selectionSet) this.decorations = buildDecorations(u.view); }
-}, { decorations: (v) => v.decorations });
+/** Collapsed frontmatter as a block widget, unless the selection touches it. State-provided because
+ * CodeMirror rejects block decorations from view plugins ("Block decorations may not be specified via plugins"). */
+function frontmatterCollapse(state: EditorState): DecorationSet {
+  const fm = frontmatterRange(state.doc.toString());
+  if (!fm) return Decoration.none;
+  const first = state.doc.lineAt(fm[0]).number, last = state.doc.lineAt(fm[1]).number;
+  for (const r of state.selection.ranges) {
+    if (state.doc.lineAt(r.to).number >= first && state.doc.lineAt(r.from).number <= last) return Decoration.none;
+  }
+  const body = state.doc.sliceString(4, Math.max(4, fm[1] - 4));
+  const title = /^title:\s*(.+)$/m.exec(body)?.[1]?.trim();
+  const keys = body.split("\n").map((l) => l.split(":")[0].trim()).filter((k) => k && !k.startsWith("#"));
+  const widget = new FrontmatterWidget(title ? `${title} · ${keys.length} properties` : `${keys.length} properties`);
+  return Decoration.set(Decoration.replace({ widget, block: true }).range(fm[0], fm[1]));
+}
+
+const frontmatterField = StateField.define<DecorationSet>({
+  create: frontmatterCollapse,
+  update(value, tr) { return tr.docChanged || tr.selection ? frontmatterCollapse(tr.state) : value; },
+  provide: (f) => EditorView.decorations.from(f),
+});
+
+export const livePreview: Extension = [
+  frontmatterField,
+  ViewPlugin.fromClass(class {
+    decorations: DecorationSet;
+    constructor(view: EditorView) { this.decorations = buildDecorations(view); }
+    update(u: ViewUpdate) { if (u.docChanged || u.viewportChanged || u.selectionSet) this.decorations = buildDecorations(u.view); }
+  }, { decorations: (v) => v.decorations }),
+];
 
