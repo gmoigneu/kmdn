@@ -70,7 +70,7 @@ Home is a composer plus your threads.
 ![Home, no threads yet](screenshots/02-home-empty.webp)
 
 - The text box describes the change you want. Pressing the arrow (or the button) starts a new thread named after the first words of the text and opens it. The text is not sent to an agent yet; you do that inside the thread.
-- **Suggest** and **Edit** are the two agent modes (see [Agents](#agents)). In this build the toggle on Home is not carried into the thread; set the mode in the thread's agent panel before the first message.
+- **Suggest** and **Edit** pick the agent mode (see [Agents](#agents)). The choice seeds the new thread's agent panel, where you can still change it before the first message.
 - Below the composer, threads are grouped by status: **In review** (a pull request exists) and **Draft**. Click one to open it.
 
 ![Composer with a change described](screenshots/06-home-composer.webp)
@@ -233,7 +233,7 @@ kmdn never commits in the main clone, but other tools might leave work there. Wh
 
 ![The local changes, now in a thread](screenshots/20-local-changes-moved.webp)
 
-If someone checked out another branch in the main clone, the card reads "on `<branch>`" and offers **Adopt branch as thread**, which puts the clone back on the default branch and registers that branch as a thread worktree (see the known issue below). The card also reports an in-progress git operation (a merge or rebase) and offers no action until it is finished.
+If someone checked out another branch in the main clone, the card reads "on `<branch>`" and offers **Adopt branch as thread**, which puts the clone back on the default branch and registers that branch as a thread. The branch keeps its own name, and abandoning that thread later removes the worktree but leaves the branch in place. The card also reports an in-progress git operation (a merge or rebase) and offers no action until it is finished.
 
 ![A foreign branch checked out in the clone](screenshots/21-adopt-branch.webp)
 
@@ -330,13 +330,10 @@ kmdn-cli init --name "Team handbook" --path /path/to/empty/folder
 
 `check` exits with status 1 when it finds errors and accepts `--asset-cap <bytes>`; `--json` switches any command to machine-readable output. `init` writes the starter template into an existing folder. Ready-made workflows that run `check` on every pull request are in `templates/ci/` for GitHub Actions and GitLab CI.
 
-## Known issues in this build
+## Known limitations
 
-- **Adopt branch as thread** registers the worktree, but the thread list only shows branches under the `kmdn/` prefix, so the adopted thread never appears and the view stays on "Loading thread…".
-- **Codex in Edit mode** can only propose changes. It reads files through shell commands, and the policy refuses shell outside Developer mode.
-- The first message sent to **Codex** right after it starts can fail with "codex thread not ready yet". Sending it again works.
-- **pi** started and ended its turn without a reply on the machine used for this guide, with no error shown in the timeline.
-- The **Suggest / Edit** toggle on Home is not applied to the thread it creates.
+- **Codex in Edit mode** can only propose changes. It reads files through shell commands, and the policy refuses shell outside Developer mode. Claude Code and pi are not affected.
+- When an agent cannot reach its model (for example an expired login), the turn ends with the provider's error in the timeline and no changes.
 
 ## Not in this version
 
