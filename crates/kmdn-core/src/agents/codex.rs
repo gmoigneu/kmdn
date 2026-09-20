@@ -329,6 +329,19 @@ mod tests {
     }
 
     #[test]
+    fn turn_start_needs_the_thread_id() {
+        let mut st = CodexState::default();
+        assert!(st.turn_start("hi").is_none(), "no thread yet");
+        let ev = st.parse_line(r#"{"id":2,"result":{"thread":{"id":"t-1"}}}"#);
+        assert!(matches!(
+            ev.first(),
+            Some(AgentEvent::SessionStarted { .. })
+        ));
+        let line = st.turn_start("hi").expect("thread id known");
+        assert!(line.contains(r#""threadId":"t-1""#));
+    }
+
+    #[test]
     fn handshake_and_turn() {
         let mut st = CodexState::default();
         let init: Value = serde_json::from_str(&st.initialize()).unwrap();

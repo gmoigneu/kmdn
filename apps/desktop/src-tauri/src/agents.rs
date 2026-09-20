@@ -307,12 +307,21 @@ impl Runtime {
         s.append_transcript(&serde_json::json!({ "user": text }));
         let line = match s.kind {
             AgentKind::Claude => agents::claude::user_message(text),
-            AgentKind::Codex => s
-                .codex
-                .lock()
-                .unwrap()
-                .turn_start(text)
-                .ok_or("codex thread not ready yet")?,
+            AgentKind::Codex => {
+                // thread/start is answered on the stdout pump, so the first prompt can arrive
+                // before the thread id does. Wait for it instead of failing the message.
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+                loop {
+                    let line = s.codex.lock().unwrap().turn_start(text);
+                    match line {
+                        Some(l) => break l,
+                        None if std::time::Instant::now() < deadline => {
+                            tokio::time::sleep(std::time::Duration::from_millis(100)).await
+                        }
+                        None => return Err("codex did not start its thread within 20s".into()),
+                    }
+                }
+            }
             AgentKind::Pi => {
                 let n = {
                     let mut c = s.prompt_counter.lock().unwrap();
