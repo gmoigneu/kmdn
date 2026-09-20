@@ -21,7 +21,7 @@ use kmdn_core::repo::{ProviderKind, RemoteInfo, Repo};
 use kmdn_core::secrets::{FileStore, SecretStore, StoredToken};
 use kmdn_core::submit::{self, Draft, Submission};
 use kmdn_core::sync::{self, FastForward, RebaseOutcome, Token};
-use kmdn_core::worktree::ThreadWorktree;
+use kmdn_core::worktree::{ThreadWorktree, BRANCH_PREFIX};
 use serde::Serialize;
 use tauri::{Manager, State};
 
@@ -416,6 +416,11 @@ async fn sync_now(state: State<'_, AppState>, root: String) -> Result<SyncReport
         let base = base_ref(&repo)?;
         let mut threads = Vec::new();
         for t in repo.list_thread_worktrees().map_err(err)? {
+            // Adopted branches belong to the user (D45): never rewrite them behind their back.
+            if !t.branch.starts_with(BRANCH_PREFIX) {
+                threads.push((t.slug, Err("adopted branch, left as is".into())));
+                continue;
+            }
             match sync::rebase_worktree(&t.path, &base) {
                 Ok(outcome) => threads.push((t.slug, Ok(outcome))),
                 Err(e) => threads.push((t.slug, Err(e.to_string()))),
