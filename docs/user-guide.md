@@ -2,7 +2,7 @@
 
 kmdn is a desktop app for teams that keep their knowledge base as plain markdown in a git repository. People edit by hand or ask an agent. Every change goes through a review, and that review is an ordinary pull request. Afterwards any agent can read the knowledge base with a plain clone, no API needed.
 
-This guide walks through the app screen by screen. The screenshots come from the macOS build at 1280×800 with a demo knowledge base called "Acme Handbook". I opened the demo as an existing local clone without signing in to GitHub or GitLab, so the screens that need a provider (the repository picker, submit for review, the review layout, discussions) are described in words and marked as such.
+This guide walks through the app screen by screen. The screenshots come from the macOS build at 1280×800 with a demo knowledge base called "Acme Handbook". I opened the demo as an existing local clone without signing in to GitHub or GitLab, so the screens that need a provider (the repository picker, submit for review, the review layout, discussions) get a description in words instead, marked as such.
 
 ## Vocabulary
 
@@ -34,7 +34,7 @@ pnpm tauri dev
 pnpm tauri build
 ```
 
-On macOS the release build lands in `target/release/bundle/macos/kmdn.app`. The command line companion `kmdn-cli` is built with `cargo build -p kmdn-cli` and described at the end of this guide.
+On macOS the release build lands in `target/release/bundle/macos/kmdn.app`. `cargo build -p kmdn-cli` builds the command line companion, described at the end of this guide.
 
 ## First run
 
@@ -72,7 +72,7 @@ Home is a composer with your threads underneath.
 
 The text box takes a description of the change you want. The arrow starts a thread named after the first words and opens it. Nothing goes to an agent at this point; you do that inside the thread. The **Suggest** and **Edit** toggle picks the agent mode (see [Agents](#agents)); it seeds the new thread's agent panel, where you can still change it before the first message.
 
-Below the composer, threads are grouped by status: **In review** when a pull request exists, **Draft** otherwise. Click one to open it.
+Below the composer, Home groups threads by status: **In review** when a pull request exists, **Draft** otherwise. Click one to open it.
 
 ![Composer with a change described](screenshots/06-home-composer.webp)
 
@@ -88,8 +88,8 @@ From top to bottom:
 - **Sync now**, the circular arrow. It fetches, fast-forwards the default branch, and rebases every kmdn thread. Sync also runs by itself when the window gains focus, then every minute while it has focus, and every five minutes once the window has been in the background for ten.
 - **Search**, which opens the command palette (⌘K).
 - **Threads**, each with a status dot and a pill. A grey dot and a `draft` pill for drafts, an accent dot and `in review` once a pull request exists, an amber dot when the thread conflicts with the default branch. A dashed **Local changes** card shows up here when the main clone has uncommitted changes or sits on a foreign branch (see [Local changes](#local-changes)).
-- **Reviews**: open pull requests that touch markdown, newest activity first, with number, title, and author. It reads "Sign in to see reviews" when there is no token for the repository's host.
-- **Documents**: every document in the knowledge base, folder in grey, title from frontmatter. A document without a frontmatter title uses its first heading, then its file name.
+- **Reviews** lists open pull requests that touch markdown, newest activity first, with number, title, and author. It reads "Sign in to see reviews" when there is no token for the repository's host.
+- **Documents** lists every document in the knowledge base, folder in grey, title from frontmatter. A document without a frontmatter title uses its first heading, then its file name.
 
 ## Documents
 
@@ -111,7 +111,7 @@ Documents are GitHub Flavored Markdown with optional YAML frontmatter. kmdn read
 |---|---|
 | `title` | Shown in the sidebar, the palette, and `AGENTS.md`. Falls back to the first `#` heading, then the file name |
 | `description` | One line summary, listed in `AGENTS.md` |
-| `status` | `draft`, `review`, `published`, or `deprecated`. Deprecated documents stay for history and are marked in `AGENTS.md` |
+| `status` | `draft`, `review`, `published`, or `deprecated`. `AGENTS.md` keeps deprecated documents for history and marks them |
 | `order` | Sort order inside a folder |
 | `owner`, `tags`, `reviewed` | Free metadata for people and agents |
 
@@ -159,7 +159,7 @@ Opening a document shows the live-preview editor. Headings, emphasis, lists, tas
 
 ![Editing a document](screenshots/09-thread-editor-open.webp)
 
-A dot after the file name marks unsaved changes. **Save**, or ⌘S, writes the file into the worktree and commits it to the thread's branch as `Update <document>`. The commit takes markdown documents and files under `assets/` only; anything else in the worktree is ignored.
+A dot after the file name marks unsaved changes. **Save**, or ⌘S, writes the file into the worktree and commits it to the thread's branch as `Update <document>`. The commit takes markdown documents and files under `assets/` only; kmdn ignores anything else in the worktree.
 
 ![Unsaved edits in the editor](screenshots/10-thread-editor-unsaved.webp)
 
@@ -189,12 +189,12 @@ The sidebar collapses to an icon strip when a thread opens. The first icon expan
 
 ## Agents
 
-Every thread can run one agent session. The picker at the bottom of the timeline lists Claude Code, Codex, and pi; the ones missing from your `PATH` are greyed out. Pick the mode next to it. Once the first message is sent, the agent and the mode are fixed for that thread.
+Every thread can run one agent session. The picker at the bottom of the timeline lists Claude Code, Codex, and pi; kmdn greys out the ones missing from your `PATH`. Pick the mode next to it. Once you send the first message, the thread keeps that agent and mode.
 
 | Mode | What the agent may do |
 |---|---|
-| Suggest | Read the knowledge base and propose changes in its reply. Writes are refused |
-| Edit (default) | Read, and write markdown documents and files under `assets/`. Shell commands are refused |
+| Suggest | Read the knowledge base and propose changes in its reply. kmdn refuses writes |
+| Edit (default) | Read, and write markdown documents and files under `assets/`. kmdn refuses shell commands |
 | Developer | Edit plus shell commands, each one approved by you. Not in the picker yet |
 
 The first message the agent receives describes the knowledge base: the format, where images go, that `AGENTS.md` is the map of documents and must not be edited, and the rules of the mode. Type your request and press the arrow or ⌘↵.
@@ -209,7 +209,7 @@ While the agent works, the timeline fills in:
 - Permission requests for anything kmdn does not decide by itself, with **Allow** and **Deny** buttons.
 - **Stop**, next to the send button, cancels the current turn.
 
-kmdn decides most tool calls without asking. Reads are allowed. Writes are allowed to markdown documents and to `assets/`, never to `AGENTS.md` or `.kmdn/`, and never in Suggest mode. Shell is refused outside Developer mode. Only what is left, such as a web fetch, reaches you as a question.
+kmdn decides most tool calls without asking. It allows reads. It allows writes to markdown documents and to `assets/`, never to `AGENTS.md` or `.kmdn/`, and never in Suggest mode. It refuses shell outside Developer mode. Only what is left, such as a web fetch, reaches you as a question.
 
 Codex is the special case, because it has no separate read tool: it looks at files with `cat`, `sed -n`, `rg`, `ls`, `find`, and `git log`. kmdn recognises those as reads when the command is a single program from a short list, has no pipes, redirections, or substitutions, and only touches paths inside the knowledge base. Anything else (`cat a.md | grep x`, `python3`, a path under your home directory) is still refused as shell. In the screenshot Codex reads the document, patches it, and the Changes tab picks up the edit as soon as the turn ends.
 
@@ -223,7 +223,7 @@ kmdn sends an OS notification when an agent needs your approval or finishes whil
 
 ### Sync
 
-Sync fetches from `origin`, fast-forwards the default branch in the main clone, and rebases every `kmdn/` thread onto it. It runs when the window gains focus, every minute while focused, and whenever you click **Sync now** or run it from the palette. A thread with unsaved edits is skipped until you save. Adopted branches (below) are never rebased automatically.
+Sync fetches from `origin`, fast-forwards the default branch in the main clone, and rebases every `kmdn/` thread onto it. It runs when the window gains focus, every minute while focused, and whenever you click **Sync now** or run it from the palette. Sync skips a thread with unsaved edits until you save. Adopted branches (below) are never rebased automatically.
 
 ### Local changes
 
@@ -249,7 +249,7 @@ When a thread's edits overlap with something that landed on the default branch, 
 
 ![Conflict banner](screenshots/23-conflict-banner.webp)
 
-**Resolve** opens the block-level resolver. You never see conflict markers. For each file, unchanged blocks are listed faded, and every block that differs shows **On main** next to **This thread** with three choices: **Keep main**, **Keep mine**, **Keep both**.
+**Resolve** opens the block-level resolver. You never see conflict markers. For each file, the resolver lists unchanged blocks faded, and every block that differs shows **On main** next to **This thread** with three choices: **Keep main**, **Keep mine**, **Keep both**.
 
 ![The conflict resolver](screenshots/24-conflict-resolver.webp)
 
@@ -265,7 +265,7 @@ When a thread's edits overlap with something that landed on the default branch, 
 
 This needs a signed-in provider for the repository's host, so there is no screenshot. In a thread with changes, **Submit for review** opens a small form above the tabs with a title (leave it empty for one generated from the changed documents) and an optional summary for reviewers.
 
-**Open review** runs the checks (broken relative links, invalid frontmatter, oversize assets, a stale `AGENTS.md`), regenerates `AGENTS.md`, pushes the branch, and opens a pull request labeled `kmdn`. With `post_agent_log: true` in the knowledge base config, a condensed log of the agent conversation (your prompts, one line per agent turn, the files it touched) goes in as a comment. If a check fails, the form lists the findings and nothing is pushed.
+**Open review** runs the checks (broken relative links, invalid frontmatter, oversize assets, a stale `AGENTS.md`), regenerates `AGENTS.md`, pushes the branch, and opens a pull request labeled `kmdn`. With `post_agent_log: true` in the knowledge base config, a condensed log of the agent conversation (your prompts, one line per agent turn, the files it touched) goes in as a comment. If a check fails, the form lists the findings and kmdn pushes nothing.
 
 After a successful submit a banner shows the pull request URL, the status pill switches to `in review`, and the primary button becomes **View review**.
 
@@ -309,7 +309,7 @@ kmdn follows the operating system's light or dark setting.
 | `<clone>/AGENTS.md` | Generated map of the documents for agents. Regenerated on submit and by `kmdn-cli index`; do not edit by hand |
 | App data folder (`~/Library/Application Support/dev.kmdn.desktop/` on macOS) | Stored tokens, the email used for commits, and one transcript per agent session under `agent-sessions/<slug>/` |
 
-Abandoning a thread removes its worktree and, for `kmdn/` branches, the branch. A thread whose pull request was merged shows as `published` in the review layout; abandon it to remove its worktree. A worktree directory deleted by hand is ignored until git prunes it.
+Abandoning a thread removes its worktree and, for `kmdn/` branches, the branch. A thread whose pull request was merged shows as `published` in the review layout; abandon it to remove its worktree. kmdn ignores a worktree directory you deleted by hand until git prunes it.
 
 ![Home after abandoning a thread](screenshots/34-home-after-abandon.webp)
 
@@ -333,7 +333,7 @@ kmdn-cli init --name "Team handbook" --path /path/to/empty/folder
 
 ## Known limitations
 
-- Codex reads through shell commands, so a compound command (pipes, redirections, `&&`), an unlisted program, or a path outside the knowledge base is refused outside Developer mode. Codex usually rephrases and carries on.
+- Codex reads through shell commands, so outside Developer mode kmdn refuses a compound command (pipes, redirections, `&&`), an unlisted program, or a path outside the knowledge base. Codex usually rephrases and carries on.
 - Reads by Claude Code and pi go through their own read tools and are not restricted to the knowledge base.
 
 ## Not in this version
@@ -341,5 +341,5 @@ kmdn-cli init --name "Team handbook" --path /path/to/empty/folder
 - Renaming a thread, copying its branch, or opening its folder from the menu.
 - Developer mode in the agent picker, model pickers, `@document` mentions, and image attachments in the composer.
 - Review comments mirrored into the thread timeline, and agent assistance during review.
-- A settings screen. Notification toggles are stored per device but have no UI yet.
-- Windows and Linux packages. The build targets exist; only macOS was exercised for this guide.
+- A settings screen. The app stores notification toggles per device but has no UI for them yet.
+- Windows and Linux packages. The build targets exist; I only exercised macOS for this guide.
