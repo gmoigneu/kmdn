@@ -20,7 +20,7 @@ export function Home() {
   ];
   const create = useMutation({
     mutationFn: (slug: string) => api.createThread(root, slug),
-    onSuccess: (t) => { qc.invalidateQueries({ queryKey: ["threads", root] }); setText(""); go({ kind: "thread", slug: t.slug }); },
+    onSuccess: (t) => { qc.invalidateQueries({ queryKey: ["threads", root] }); setText(""); go({ kind: "thread", slug: t.slug, initialMode: mode }); },
   });
 
   return (
