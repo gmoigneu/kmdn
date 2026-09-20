@@ -16,5 +16,6 @@ kmdn is a desktop markdown editor for teams building a knowledge base that agent
 | [10-ui.md](10-ui.md) | Screens, sidebar, thread view, review layout, composer, palette, visual design |
 | [11-agent-integration-research.md](11-agent-integration-research.md) | How Orca, Conductor, Nimbalyst, Vibe Kanban embed agents; ACP vs native protocols; recommendation |
 | [12-review-2026-09-20.md](12-review-2026-09-20.md) | Security, performance, and code review findings with citations; issues 49 to 69 |
+| [user-guide.md](user-guide.md) | Product guide with screenshots: first run, home, documents, palette, threads, editor, agents, sync and conflicts, review |
 
 Status: design complete, 61 decisions recorded. Next step is the four spikes. No product code yet. Decisions dated 2026-09-18 and 2026-09-19.
