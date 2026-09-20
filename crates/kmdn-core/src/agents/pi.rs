@@ -179,6 +179,16 @@ pub fn parse_line(line: &str) -> Vec<AgentEvent> {
                 .unwrap_or("pi error")
                 .into(),
         }),
+        // A turn that ends in a model or auth error has no text; pi reports it on the message.
+        "turn_end" if m.pointer("/message/stopReason").and_then(Value::as_str) == Some("error") => {
+            out.push(AgentEvent::Error {
+                message: m
+                    .pointer("/message/errorMessage")
+                    .and_then(Value::as_str)
+                    .unwrap_or("pi turn failed")
+                    .into(),
+            })
+        }
         "agent_end" => out.push(AgentEvent::TurnDone),
         _ => {}
     }
@@ -228,6 +238,17 @@ mod tests {
             "scratch.txt blocked by the gate"
         );
         assert!(matches!(events.last(), Some(AgentEvent::TurnDone)));
+    }
+
+    #[test]
+    fn surfaces_a_turn_that_ended_in_an_error() {
+        let line = r#"{"type":"turn_end","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"OAuth refresh failed for anthropic"}}"#;
+        let ev = parse_line(line);
+        assert!(
+            matches!(&ev[..], [AgentEvent::Error { message }] if message.contains("OAuth refresh failed"))
+        );
+        let ok = r#"{"type":"turn_end","message":{"role":"assistant","content":[],"stopReason":"stop"}}"#;
+        assert!(parse_line(ok).is_empty());
     }
 
     #[test]
