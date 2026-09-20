@@ -1,15 +1,17 @@
 // Cmd-K palette (D52): documents, threads, reviews, actions. Every action also has a mouse path.
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FileText, GitPullRequest, Layers, Plus, RefreshCw, Search } from "lucide-react";
+import { FileText, GitPullRequest, Layers, Palette, Plus, RefreshCw, Search } from "lucide-react";
 import { api } from "@/lib/api";
 import { useUi } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import { useAppearance } from "@/lib/appearance";
 
 interface Entry { id: string; group: string; label: string; hint?: string; icon: typeof Layers; run: () => void }
 
 export function CommandPalette() {
   const { kb, go, toggleSidebar } = useUi();
+  const openAppearance = useAppearance((s) => s.setOpen);
   const root = kb?.root;
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -41,12 +43,13 @@ export function CommandPalette() {
       { id: "a:sync", group: "Actions", label: "Sync now", hint: "fetch, fast-forward, rebase threads", icon: RefreshCw, run: () => sync.mutate() },
       { id: "a:home", group: "Actions", label: "Go home", icon: Layers, run: () => go({ kind: "home" }) },
       { id: "a:sidebar", group: "Actions", label: "Toggle sidebar", icon: Layers, run: toggleSidebar },
+      { id: "a:appearance", group: "Actions", label: "Appearance", hint: "theme, fonts, text size", icon: Palette, run: () => openAppearance(true) },
     ];
     for (const t of threads.data ?? []) list.push({ id: `t:${t.slug}`, group: "Threads", label: t.slug, hint: t.branch, icon: Layers, run: () => go({ kind: "thread", slug: t.slug }) });
     for (const p of reviews.data ?? []) list.push({ id: `r:${p.number}`, group: "Reviews", label: p.title, hint: `#${p.number} by ${p.author}`, icon: GitPullRequest, run: () => go({ kind: "review", number: p.number }) });
     for (const d of docs.data ?? []) list.push({ id: `d:${d.path}`, group: "Documents", label: d.title, hint: d.path, icon: FileText, run: () => go({ kind: "document", path: d.path }) });
     return list;
-  }, [root, q, threads.data, reviews.data, docs.data, go, toggleSidebar, newThread, sync]);
+  }, [root, q, threads.data, reviews.data, docs.data, go, toggleSidebar, openAppearance, newThread, sync]);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();

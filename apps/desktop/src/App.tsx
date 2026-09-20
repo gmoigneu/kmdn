@@ -6,12 +6,14 @@ import { ThreadView } from "./screens/ThreadView";
 import { DocumentView } from "./screens/DocumentView";
 import { ReviewView } from "./screens/ReviewView";
 import { CommandPalette } from "./components/CommandPalette";
+import { AppearanceDialog } from "./components/AppearanceDialog";
 
 export default function App() {
   const { kb, view } = useUi();
-  if (!kb) return <SignIn />;
+  if (!kb) return (<><AppearanceDialog /><SignIn /></>);
   return (
     <div className="flex h-full">
+      <AppearanceDialog />
       <CommandPalette />
       <Sidebar />
       <main className="flex-1 min-w-0 flex flex-col">

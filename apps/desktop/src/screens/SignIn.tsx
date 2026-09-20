@@ -3,15 +3,17 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { FolderOpen, Github, KeyRound, Plus } from "lucide-react";
+import { FolderOpen, Github, KeyRound, Palette, Plus } from "lucide-react";
 import { api, type RepoSummary } from "@/lib/api";
 import { useUi } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import { useAppearance } from "@/lib/appearance";
 
 type Step = "signin" | "pick" | "folder";
 
 export function SignIn() {
   const setKb = useUi((s) => s.setKb);
+  const openAppearance = useAppearance((s) => s.setOpen);
   const qc = useQueryClient();
   const auth = useQuery({ queryKey: ["auth"], queryFn: api.authStatus });
   const signedIn = (auth.data?.hosts.length ?? 0) > 0;
@@ -90,6 +92,7 @@ export function SignIn() {
             </span>
           ))}
           <button onClick={() => openExisting.mutate()} className="ml-auto flex items-center gap-1 hover:text-fg"><FolderOpen size={12} /> Open existing clone</button>
+          <button onClick={() => openAppearance(true)} title="Appearance" className="hover:text-fg"><Palette size={12} /></button>
         </div>
 
         <div className="p-5">
