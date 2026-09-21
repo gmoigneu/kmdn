@@ -11,6 +11,7 @@ use kmdn_core::commit::{
     allowed_set, commit_allowed_except, commit_paths, revert_paths, Author, DEFAULT_ALLOWED,
 };
 use kmdn_core::diff::FileChange;
+use kmdn_core::drafts::{Draft as EditorDraft, DraftStore};
 use kmdn_core::index::{self, Document, KbConfig};
 use kmdn_core::local_changes::{self, LocalChanges};
 use kmdn_core::provider::github::{self, GitHub};
@@ -34,6 +35,8 @@ pub struct AppState {
     secrets: Arc<FileStore>,
     data_dir: PathBuf,
     agents: Arc<agents::Runtime>,
+    /// App-local SQLite: unsaved editor text (D27). Never committed.
+    drafts: Arc<std::sync::Mutex<DraftStore>>,
 }
 
 #[derive(Serialize)]
@@ -378,11 +381,17 @@ fn create_thread(
 }
 
 #[tauri::command]
-fn abandon_thread(root: String, slug: String) -> Result<(), String> {
+fn abandon_thread(state: State<AppState>, root: String, slug: String) -> Result<(), String> {
     Repo::open(&root)
         .map_err(err)?
         .remove_thread_worktree(&slug, true)
-        .map_err(err)
+        .map_err(err)?;
+    if let Ok(d) = state.drafts.lock() {
+        for dr in d.list(&root, &slug).unwrap_or_default() {
+            let _ = d.delete(&root, &slug, &dr.path);
+        }
+    }
+    Ok(())
 }
 
 /// Writes the file inside the thread's worktree and commits it (D27).
@@ -428,6 +437,9 @@ fn save_document(
         &pending,
     )
     .map_err(err)?;
+    if let Ok(d) = state.drafts.lock() {
+        let _ = d.delete(&root, &slug, &path);
+    }
     Ok(oid.map(|o| o.to_string()))
 }
 
@@ -482,6 +494,7 @@ async fn submit_thread(
     let secrets = state.secrets.clone();
     let data_dir = state.data_dir.clone();
     let agents_rt = state.agents.clone();
+    let drafts = state.drafts.clone();
     // The author saw and possibly edited the log in the submit form; None means do not post (D58).
     let agent_log = agent_log.filter(|l| !l.trim().is_empty());
     blocking(move || {
@@ -489,6 +502,7 @@ async fn submit_thread(
             secrets,
             data_dir,
             agents: agents_rt,
+            drafts,
         };
         let repo = Repo::open(&root).map_err(err)?;
         let wt = worktree_for(&repo, &slug)?;
@@ -1040,6 +1054,70 @@ fn agent_revert(
     Ok(())
 }
 
+// ---------- drafts (D27): unsaved editor text mirrored to local SQLite
+
+#[tauri::command]
+fn draft_save(
+    state: State<AppState>,
+    root: String,
+    slug: String,
+    path: String,
+    text: String,
+) -> Result<(), String> {
+    inside(Path::new(&root), &path).or_else(|_| inside(Path::new(&root), &path))?;
+    state
+        .drafts
+        .lock()
+        .map_err(err)?
+        .put(&root, &slug, &path, &text)
+        .map_err(err)
+}
+
+#[tauri::command]
+fn draft_get(
+    state: State<AppState>,
+    root: String,
+    slug: String,
+    path: String,
+) -> Result<Option<EditorDraft>, String> {
+    state
+        .drafts
+        .lock()
+        .map_err(err)?
+        .get(&root, &slug, &path)
+        .map_err(err)
+}
+
+#[tauri::command]
+fn draft_clear(
+    state: State<AppState>,
+    root: String,
+    slug: String,
+    path: String,
+) -> Result<(), String> {
+    state
+        .drafts
+        .lock()
+        .map_err(err)?
+        .delete(&root, &slug, &path)
+        .map_err(err)
+}
+
+/// Drafts for a thread, so the UI can offer recovery for files not currently open.
+#[tauri::command]
+fn draft_list(
+    state: State<AppState>,
+    root: String,
+    slug: String,
+) -> Result<Vec<EditorDraft>, String> {
+    state
+        .drafts
+        .lock()
+        .map_err(err)?
+        .list(&root, &slug)
+        .map_err(err)
+}
+
 // ---------- auth
 
 #[tauri::command]
@@ -1208,10 +1286,14 @@ pub fn run() {
                 .app_data_dir()
                 .unwrap_or_else(|_| PathBuf::from(".kmdn-data"));
             std::fs::create_dir_all(&dir).ok();
+            let drafts = DraftStore::open(&dir.join("local.sqlite"))
+                .or_else(|_| DraftStore::in_memory())
+                .expect("draft store");
             app.manage(AppState {
                 secrets: Arc::new(FileStore::new(dir.join("secrets.json"))),
                 data_dir: dir,
                 agents: Arc::new(agents::Runtime::default()),
+                drafts: Arc::new(std::sync::Mutex::new(drafts)),
             });
             Ok(())
         })
@@ -1252,6 +1334,10 @@ pub fn run() {
             agent_pending,
             agent_accept,
             agent_revert,
+            draft_save,
+            draft_get,
+            draft_clear,
+            draft_list,
             auth_status,
             auth_start_device_flow,
             auth_poll_device_flow,

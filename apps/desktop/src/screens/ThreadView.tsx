@@ -51,10 +51,20 @@ export function ThreadView({ slug, initialPath, initialMode, initialPrompt, init
   const file = useQuery({ queryKey: ["wt-file", t?.path, openPath], queryFn: () => api.readDocument(t!.path, openPath!), enabled: !!t && !!openPath });
   useEffect(() => { if (file.data != null && !dirty) setBuffer(file.data); }, [file.data, dirty]);
 
+  // Crash recovery (D27): mirror unsaved text to local SQLite, offer it back when it differs from disk.
+  const draft = useQuery({ queryKey: ["draft", root, slug, openPath], queryFn: () => api.draftGet(root, slug, openPath!), enabled: !!openPath });
+  const recoverable = draft.data && file.data != null && draft.data.text !== file.data && !dirty ? draft.data : null;
+  useEffect(() => {
+    if (!openPath || !dirty) return;
+    const t = setTimeout(() => { api.draftSave(root, slug, openPath, buffer).catch(() => {}); }, 800);
+    return () => clearTimeout(t);
+  }, [buffer, dirty, openPath, root, slug]);
+
   const save = useMutation({
     mutationFn: () => api.saveDocument(root, slug, openPath!, buffer),
     onSuccess: () => {
       setDirty(false);
+      qc.invalidateQueries({ queryKey: ["draft", root, slug, openPath] });
       qc.invalidateQueries({ queryKey: ["changes", root, slug] });
       qc.invalidateQueries({ queryKey: ["wt-docs", t?.path] });
       qc.invalidateQueries({ queryKey: ["wt-file", t?.path, openPath] });
@@ -215,6 +225,14 @@ export function ThreadView({ slug, initialPath, initialMode, initialPrompt, init
             {tab === "editor" && (openPath ? (
               <div className="h-full flex flex-col">
                 <div className="px-3 h-7 flex items-center text-[11px] font-mono text-fg-muted border-b border-border">{openPath}{dirty && " •"}</div>
+                {recoverable && (
+                  <div className="px-3 py-1.5 border-b border-warn/50 bg-bg-muted text-xs flex items-center gap-2">
+                    <span>Unsaved text from {new Date(recoverable.updated_at * 1000).toLocaleString()} was recovered for this document.</span>
+                    <span className="ml-auto" />
+                    <button onClick={() => { setBuffer(recoverable.text); setDirty(true); }} className="h-6 px-2 rounded-md bg-accent text-accent-fg">Restore</button>
+                    <button onClick={() => api.draftClear(root, slug, openPath!).then(() => qc.invalidateQueries({ queryKey: ["draft", root, slug, openPath] }))} className="h-6 px-2 rounded-md border border-border">Discard</button>
+                  </div>
+                )}
                 <MarkdownEditor key={openPath} value={buffer} onChange={(next) => { setBuffer(next); setDirty(true); }} onSave={() => { if (dirty) save.mutate(); }} className="flex-1 min-h-0 overflow-hidden" />
                 {save.error && <p className="px-3 py-1 text-danger text-xs">{String(save.error)}</p>}
               </div>

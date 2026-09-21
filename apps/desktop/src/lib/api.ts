@@ -52,6 +52,7 @@ export interface Issue { number: number; title: string; body: string; url: strin
 export interface Discussion { issue: Issue | null; comments: Comment[] }
 export interface Submission { pull: PullRequest; created: boolean; pushed_head: string; log_comment: Comment | null }
 export interface SubmitPreview { default_title: string; agent_log: string | null; post_agent_log: boolean; labels: string[]; existing_pull: number | null }
+export interface Draft { root: string; slug: string; path: string; text: string; updated_at: number }
 export interface SubmitOutcome { submission: Submission | null; findings: Finding[]; error: string | null }
 export interface Mergeability { mergeable: boolean | null; state: string; approvals: number; changes_requested: boolean; checks_passing: boolean | null }
 export interface ReviewDetail { pull: PullRequest; changes: FileChange[]; comments: Comment[]; mergeability: Mergeability; head_sha: string }
@@ -185,6 +186,10 @@ export const api = {
   agentCancel: (slug: string) => invoke<void>("agent_cancel", { slug }),
   agentStop: (slug: string) => invoke<void>("agent_stop", { slug }),
   agentSession: (slug: string) => invoke<SessionInfo | null>("agent_session", { slug }),
+  draftSave: (root: string, slug: string, path: string, text: string) => invoke<void>("draft_save", { root, slug, path, text }),
+  draftGet: (root: string, slug: string, path: string) => invoke<Draft | null>("draft_get", { root, slug, path }),
+  draftClear: (root: string, slug: string, path: string) => invoke<void>("draft_clear", { root, slug, path }),
+  draftList: (root: string, slug: string) => invoke<Draft[]>("draft_list", { root, slug }),
   agentPending: (root: string, slug: string) => invoke<string[]>("agent_pending", { root, slug }),
   agentAccept: (root: string, slug: string, paths: string[]) => invoke<string | null>("agent_accept", { root, slug, paths }),
   agentRevert: (root: string, slug: string, paths: string[]) => invoke<void>("agent_revert", { root, slug, paths }),
