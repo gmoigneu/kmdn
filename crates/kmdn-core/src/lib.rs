@@ -14,6 +14,7 @@
 //! - `local_changes`: the main clone's dirty state, move to thread, adopt branch
 //! - `provider`: GitHub and GitLab behind one trait: PRs, reviews, comments, issues, auth
 //! - `submit`: checks, index, push with lease, create or update the PR, agent log comment
+//! - `search`: full-text search over titles and bodies in the app-local SQLite (D12, D33)
 //! - `secrets`: provider token storage
 //!
 //! Providers, the block-level conflict model, and agent adapters land in later issues.
@@ -29,6 +30,7 @@ pub mod index;
 pub mod local_changes;
 pub mod provider;
 pub mod repo;
+pub mod search;
 pub mod secrets;
 pub mod submit;
 pub mod sync;

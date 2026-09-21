@@ -21,6 +21,7 @@ use kmdn_core::provider::{
     RepoRef, RepoSummary, ReviewEvent, Side, User,
 };
 use kmdn_core::repo::{ProviderKind, RemoteInfo, Repo};
+use kmdn_core::search::{Hit, SearchIndex};
 use kmdn_core::secrets::{SecretStore, StoredToken};
 use kmdn_core::submit::{self, Draft, Submission};
 use kmdn_core::sync::{self, FastForward, RebaseOutcome, Token};
@@ -38,6 +39,8 @@ pub struct AppState {
     agents: Arc<agents::Runtime>,
     /// App-local SQLite: unsaved editor text (D27). Never committed.
     drafts: Arc<std::sync::Mutex<DraftStore>>,
+    /// Full-text index over document bodies, same SQLite file (D33).
+    search: Arc<std::sync::Mutex<Option<SearchIndex>>>,
 }
 
 #[derive(Serialize)]
@@ -1171,6 +1174,41 @@ async fn add_ci_check(state: State<'_, AppState>, root: String) -> Result<Thread
     .await
 }
 
+// ---------- search (D33): FTS over titles and bodies, rebuilt in the background
+
+/// Rebuilds the index for a knowledge base from one tree walk. Called after open and when
+/// main advances; runs on a blocking thread so the tree renders first.
+#[tauri::command]
+async fn reindex_kb(state: State<'_, AppState>, root: String) -> Result<usize, String> {
+    let state = state.inner().clone();
+    blocking(move || {
+        let scan = index::scan_full(Path::new(&root));
+        let mut guard = state.search.lock().map_err(err)?;
+        match guard.as_mut() {
+            Some(idx) => idx.reindex(&root, &scan).map_err(err),
+            None => Ok(0),
+        }
+    })
+    .await
+}
+
+#[tauri::command]
+async fn search_docs(
+    state: State<'_, AppState>,
+    root: String,
+    query: String,
+) -> Result<Vec<Hit>, String> {
+    let state = state.inner().clone();
+    blocking(move || {
+        let guard = state.search.lock().map_err(err)?;
+        match guard.as_ref() {
+            Some(idx) => idx.search(&root, &query, 20).map_err(err),
+            None => Ok(vec![]),
+        }
+    })
+    .await
+}
+
 // ---------- drafts (D27): unsaved editor text mirrored to local SQLite
 
 #[tauri::command]
@@ -1516,9 +1554,13 @@ pub fn run() {
                 .expect("draft store");
             app.manage(AppState {
                 secrets: Arc::from(kmdn_core::secrets::open_default(&dir)),
-                data_dir: dir,
+                data_dir: dir.clone(),
                 agents: Arc::new(agents::Runtime::default()),
                 drafts: Arc::new(std::sync::Mutex::new(drafts)),
+
+                search: Arc::new(std::sync::Mutex::new(
+                    SearchIndex::open(&dir.join("local.sqlite")).ok(),
+                )),
             });
             Ok(())
         })
@@ -1561,6 +1603,8 @@ pub fn run() {
             agent_accept,
             agent_revert,
             add_ci_check,
+            reindex_kb,
+            search_docs,
             draft_save,
             draft_get,
             draft_clear,

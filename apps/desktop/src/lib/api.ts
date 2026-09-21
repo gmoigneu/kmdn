@@ -52,6 +52,7 @@ export interface Issue { number: number; title: string; body: string; url: strin
 export interface Discussion { issue: Issue | null; comments: Comment[] }
 export interface Submission { pull: PullRequest; created: boolean; pushed_head: string; log_comment: Comment | null }
 export interface SubmitPreview { default_title: string; agent_log: string | null; post_agent_log: boolean; labels: string[]; existing_pull: number | null }
+export interface SearchHit { path: string; title: string; snippet: string }
 export interface Draft { root: string; slug: string; path: string; text: string; updated_at: number }
 export interface SubmitOutcome { submission: Submission | null; findings: Finding[]; error: string | null }
 export interface Mergeability { mergeable: boolean | null; state: string; approvals: number; changes_requested: boolean; checks_passing: boolean | null }
@@ -181,6 +182,8 @@ export const api = {
   agentDetect: () => invoke<DetectedAgent[]>("agent_detect"),
   diagnostics: () => invoke<string>("diagnostics"),
   addCiCheck: (root: string) => invoke<ThreadWorktree>("add_ci_check", { root }),
+  reindexKb: (root: string) => invoke<number>("reindex_kb", { root }),
+  searchDocs: (root: string, query: string) => invoke<SearchHit[]>("search_docs", { root, query }),
   agentStart: (root: string, slug: string, kind: AgentKind, mode: AgentMode, resume: string | null = null) =>
     invoke<SessionInfo>("agent_start", { root, slug, kind, mode, resume }),
   agentSend: (slug: string, text: string) => invoke<void>("agent_send", { slug, text }),
