@@ -26,6 +26,8 @@ pub enum Kind {
     OversizeAsset,
     StaleIndex,
     NonImageAsset,
+    /// A directory that agent CLIs read configuration or hooks from.
+    AgentConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -166,6 +168,19 @@ pub fn run(root: &Path, opts: &Options_) -> Vec<Finding> {
         }
     }
 
+    // Repo-controlled agent configuration executes on the machine of whoever opens a thread.
+    // kmdn launches Claude with user settings only; pi and Codex may still read these (review S7).
+    for dir in [".claude", ".pi", ".codex", ".agents", ".cursor", ".gemini"] {
+        if root.join(dir).is_dir() {
+            findings.push(Finding {
+                level: Level::Warning,
+                kind: Kind::AgentConfig,
+                path: format!("{dir}/"),
+                message: format!("{dir}/ holds agent configuration or hooks that run for everyone who opens a thread; keep it out of a shared knowledge base"),
+            });
+        }
+    }
+
     if index::agents_md_is_stale(root) {
         findings.push(Finding {
             level: Level::Error,
@@ -196,8 +211,10 @@ mod tests {
         std::fs::write(r.join("ops/rollback.md"), "---\ntitle: [\n---\n").unwrap();
         std::fs::write(r.join("ops/assets/deploy/a.png"), vec![0u8; 10]).unwrap();
         std::fs::write(r.join("ops/assets/deploy/big.pdf"), vec![0u8; 20]).unwrap();
+        std::fs::create_dir_all(r.join(".claude")).unwrap();
         let f = run(r, &Options_ { asset_cap: 15 });
         let kinds: Vec<Kind> = f.iter().map(|x| x.kind).collect();
+        assert!(kinds.contains(&Kind::AgentConfig));
         assert!(kinds.contains(&Kind::BrokenLink), "{f:?}");
         assert!(kinds.contains(&Kind::InvalidFrontmatter));
         assert!(kinds.contains(&Kind::OversizeAsset));
