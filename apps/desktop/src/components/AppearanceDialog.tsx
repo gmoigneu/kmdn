@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { Check, RotateCcw, X } from "lucide-react";
 import { MONO_FONTS, TEXT_SIZE, THEMES, UI_FONTS, useAppearance, type Theme, type ThemeChoice } from "@/lib/appearance";
+import { useSettings } from "@/lib/settings";
 import { getNotifyPrefs, setNotifyPref, type NotifyEvent } from "@/lib/notify";
 import { cn } from "@/lib/utils";
 
@@ -53,6 +54,7 @@ const NOTIFY: [NotifyEvent, string][] = [
 
 export function AppearanceDialog() {
   const { appearance: a, open, setOpen, update, reset } = useAppearance();
+  const settings = useSettings();
   const [notify, setNotify] = useState(getNotifyPrefs);
   useEffect(() => {
     if (!open) return;
@@ -106,6 +108,14 @@ export function AppearanceDialog() {
           <div className="mt-2 rounded-md border border-border p-3 prose-pane">
             <p className="m-0">Deploys to production are manual and happen <strong>twice a day</strong>. See <span className="text-accent underline">Deploying</span> and <code>kmdn-cli check</code>.</p>
           </div>
+        </section>
+
+        <section className="px-4 pt-4 space-y-1">
+          <h3 className="text-[11px] uppercase tracking-wide text-fg-muted">Agents</h3>
+          <label className="flex items-start gap-2 text-xs">
+            <input type="checkbox" checked={settings.developerMode} onChange={(e) => settings.update({ developerMode: e.target.checked })} className="accent-accent mt-0.5" />
+            <span>Show the Developer mode in the composer. In that mode an agent may run shell commands, each one asking you first. Off by default (D46).</span>
+          </label>
         </section>
 
         <section className="px-4 py-4 space-y-1">

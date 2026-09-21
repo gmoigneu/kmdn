@@ -2,10 +2,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
-import { ArrowUp, Bot, Check, Loader2, Square, X } from "lucide-react";
+import { ArrowUp, Bot, Check, ImagePlus, Loader2, Square, X } from "lucide-react";
 import { api, type AgentEnvelope, type AgentEvent, type AgentKind, type AgentMode, type ToolKind } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { notify } from "@/lib/notify";
+import { useSettings } from "@/lib/settings";
 
 type Item =
   | { kind: "user"; text: string }
@@ -20,7 +21,7 @@ function toolLabel(t: ToolKind) {
   return typeof t === "string" ? t : t.other;
 }
 
-export function AgentPanel({ root, slug, branch, initialMode, initialPrompt, initialAgent, onChanged }: { root: string; slug: string; branch: string; initialMode?: AgentMode; initialPrompt?: string; initialAgent?: AgentKind; onChanged: () => void }) {
+export function AgentPanel({ root, slug, branch, worktreePath, initialMode, initialPrompt, initialAgent, onChanged }: { root: string; slug: string; branch: string; worktreePath?: string; initialMode?: AgentMode; initialPrompt?: string; initialAgent?: AgentKind; onChanged: () => void }) {
   const detected = useQuery({ queryKey: ["agents"], queryFn: api.agentDetect, staleTime: 60_000 });
   const session = useQuery({ queryKey: ["agent-session", slug], queryFn: () => api.agentSession(slug) });
   const [kind, setKind] = useState<AgentKind>(initialAgent ?? "claude");
@@ -29,6 +30,41 @@ export function AgentPanel({ root, slug, branch, initialMode, initialPrompt, ini
   const [items, setItems] = useState<Item[]>([]);
   const [busy, setBusy] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
+  const developerMode = useSettings((s) => s.developerMode);
+  const modes: AgentMode[] = developerMode ? ["suggest", "edit", "developer"] : ["suggest", "edit"];
+  // @doc mentions (D46): typing @ lists documents in the worktree and inserts the repo-relative path.
+  const wtDocs = useQuery({ queryKey: ["wt-docs", worktreePath], queryFn: () => api.listDocuments(worktreePath!), enabled: !!worktreePath });
+  const [mention, setMention] = useState<{ start: number; query: string } | null>(null);
+  const textarea = useRef<HTMLTextAreaElement>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const mentionHits = mention ? (wtDocs.data ?? []).filter((d) => (d.title + " " + d.path).toLowerCase().includes(mention.query.toLowerCase())).slice(0, 8) : [];
+  function onTextChange(v: string, caret: number) {
+    setText(v);
+    const before = v.slice(0, caret);
+    const m = /(^|\s)@([\w./-]*)$/.exec(before);
+    setMention(m ? { start: caret - m[2].length - 1, query: m[2] } : null);
+  }
+  function insertMention(path: string) {
+    if (!mention) return;
+    const caret = textarea.current?.selectionStart ?? text.length;
+    const next = text.slice(0, mention.start) + path + " " + text.slice(caret);
+    setText(next); setMention(null);
+    setTimeout(() => textarea.current?.focus(), 0);
+  }
+  async function attachImages(files: FileList | null) {
+    if (!files) return;
+    for (const f of Array.from(files)) {
+      if (!f.type.startsWith("image/")) continue;
+      const bytes = new Uint8Array(await f.arrayBuffer());
+      let bin = "";
+      for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      try {
+        const rel = await api.saveAsset(root, slug, "", f.name, btoa(bin));
+        setText((t) => `${t}${t && !t.endsWith("\n") ? "\n" : ""}Attached image: ${rel}\n`);
+      } catch (e) { setItems((p) => [...p, { kind: "note", text: String(e), error: true }]); }
+    }
+    if (fileInput.current) fileInput.current.value = "";
+  }
 
   useEffect(() => {
     const first = detected.data?.find((d) => d.available)?.kind;
@@ -174,8 +210,19 @@ export function AgentPanel({ root, slug, branch, initialMode, initialPrompt, ini
         })}
       </div>
       <div className="border-t border-border p-2 space-y-2">
-        <textarea value={text} onChange={(e) => setText(e.target.value)} rows={3}
-          onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && text.trim() && !busy) send.mutate(); }}
+        {mention && mentionHits.length > 0 && (
+          <ul className="rounded-md border border-border bg-bg-elevated text-xs max-h-40 overflow-y-auto">
+            {mentionHits.map((d) => (
+              <li key={d.path}><button onMouseDown={(e) => { e.preventDefault(); insertMention(d.path); }} className="w-full text-left px-2 py-1 hover:bg-bg-muted flex gap-2"><span>{d.title}</span><span className="text-fg-muted font-mono truncate">{d.path}</span></button></li>
+            ))}
+          </ul>
+        )}
+        <textarea ref={textarea} value={text} onChange={(e) => onTextChange(e.target.value, e.target.selectionStart ?? e.target.value.length)} rows={3}
+          onKeyDown={(e) => {
+            if (mention && mentionHits.length > 0 && (e.key === "Enter" || e.key === "Tab") && !e.metaKey && !e.ctrlKey) { e.preventDefault(); insertMention(mentionHits[0].path); return; }
+            if (e.key === "Escape" && mention) { setMention(null); return; }
+            if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && text.trim() && !busy) send.mutate();
+          }}
           placeholder={noAgents ? "No agent available. Edit by hand in the Editor tab." : `Ask ${AGENT_LABEL[kind]}… (⌘↵ to send)`}
           disabled={!!noAgents}
           className="w-full resize-none rounded-md border border-border bg-bg p-2 text-sm outline-none disabled:opacity-50" />
@@ -188,11 +235,13 @@ export function AgentPanel({ root, slug, branch, initialMode, initialPrompt, ini
             })}
           </select>
           <div className="flex rounded-md border border-border overflow-hidden">
-            {(["suggest", "edit"] as AgentMode[]).map((m) => (
+            {modes.map((m) => (
               <button key={m} onClick={() => setMode(m)} disabled={!!session.data} className={cn("px-2 h-7 capitalize", mode === m ? "bg-bg-muted" : "text-fg-muted")}>{m}</button>
             ))}
           </div>
           <span className="flex items-center gap-1 text-fg-muted"><Bot size={12} />{session.data ? `${AGENT_LABEL[session.data.kind]} · ${session.data.mode}` : "not started"}</span>
+          <input ref={fileInput} type="file" accept="image/*" multiple className="hidden" onChange={(e) => void attachImages(e.target.files)} />
+          <button onClick={() => fileInput.current?.click()} className="h-7 px-2 rounded-md border border-border flex items-center gap-1" title="Attach an image: it is copied into assets/attachments and referenced in the message"><ImagePlus size={12} /></button>
           <span className="ml-auto" />
           {busy && <button onClick={() => api.agentCancel(slug)} className="h-7 px-2 rounded-md border border-border flex items-center gap-1" title="Stop this turn"><Square size={11} /> Stop</button>}
           <button disabled={!text.trim() || busy || !!noAgents} onClick={() => send.mutate()} className="size-7 rounded-md bg-accent text-accent-fg grid place-items-center disabled:opacity-40" title="Send">

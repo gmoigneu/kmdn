@@ -1226,7 +1226,10 @@ async fn save_asset(
         use sha2::Digest;
         let repo = Repo::open(&root).map_err(err)?;
         let wt = worktree_for(&repo, &slug)?;
-        inside(&wt.path, &doc_path)?;
+        // Empty doc_path: an attachment from the composer, stored under assets/attachments.
+        if !doc_path.is_empty() {
+            inside(&wt.path, &doc_path)?;
+        }
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(data_base64.trim())
             .map_err(|_| "image data is not valid base64".to_string())?;
@@ -1250,11 +1253,15 @@ async fn save_asset(
         let hash = format!("{:x}", sha2::Sha256::digest(&bytes));
         let doc = Path::new(&doc_path);
         let doc_dir = doc.parent().unwrap_or(Path::new(""));
-        let doc_slug = kmdn_core::worktree::slugify(
-            &doc.file_stem()
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or_default(),
-        );
+        let doc_slug = if doc_path.is_empty() {
+            "attachments".to_string()
+        } else {
+            kmdn_core::worktree::slugify(
+                &doc.file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_default(),
+            )
+        };
         let rel_dir = doc_dir.join("assets").join(&doc_slug);
         let file = format!("{}.{ext}", &hash[..12]);
         let full_dir = wt.path.join(&rel_dir);
