@@ -1,5 +1,6 @@
-//! Provider token storage (D10). The OS keychain backend lands with packaging (#14); until
-//! then a 0600 file in the app data directory keeps tokens out of the repo and out of logs.
+//! Provider token storage (D10). Tokens live in the OS keychain (macOS Keychain, Windows
+//! Credential Manager, Secret Service on Linux). Where no keychain is reachable, a 0600 file in
+//! the app data directory is the fallback.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -12,6 +13,8 @@ pub enum SecretError {
     Io(#[from] std::io::Error),
     #[error("corrupt secret store: {0}")]
     Corrupt(String),
+    #[error("keychain: {0}")]
+    Keychain(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -101,6 +104,119 @@ impl SecretStore for FileStore {
     }
 }
 
+const SERVICE: &str = "kmdn";
+
+/// OS keychain backend. One entry per host holding the token record as JSON; the list of
+/// hosts lives in a small non-secret index file because keychains cannot enumerate entries.
+pub struct KeyringStore {
+    index: PathBuf,
+}
+
+impl KeyringStore {
+    pub fn new(index: impl AsRef<Path>) -> Self {
+        Self {
+            index: index.as_ref().to_path_buf(),
+        }
+    }
+
+    fn entry(host: &str) -> Result<keyring::Entry, SecretError> {
+        keyring::Entry::new(SERVICE, host).map_err(|e| SecretError::Keychain(e.to_string()))
+    }
+
+    fn read_index(&self) -> Vec<String> {
+        std::fs::read_to_string(&self.index)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
+    }
+
+    fn write_index(&self, hosts: &[String]) -> Result<(), SecretError> {
+        if let Some(p) = self.index.parent() {
+            std::fs::create_dir_all(p)?;
+        }
+        std::fs::write(
+            &self.index,
+            serde_json::to_vec(hosts).map_err(|e| SecretError::Corrupt(e.to_string()))?,
+        )?;
+        Ok(())
+    }
+
+    /// Round-trips a canary entry to find out whether a keychain is actually usable here.
+    pub fn probe() -> bool {
+        let Ok(e) = keyring::Entry::new(SERVICE, "kmdn-probe") else {
+            return false;
+        };
+        let ok =
+            e.set_password("ok").is_ok() && e.get_password().map(|v| v == "ok").unwrap_or(false);
+        let _ = e.delete_credential();
+        ok
+    }
+}
+
+impl SecretStore for KeyringStore {
+    fn get(&self, host: &str) -> Result<Option<StoredToken>, SecretError> {
+        match Self::entry(host)?.get_password() {
+            Ok(json) => Ok(Some(
+                serde_json::from_str(&json).map_err(|e| SecretError::Corrupt(e.to_string()))?,
+            )),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(e) => Err(SecretError::Keychain(e.to_string())),
+        }
+    }
+    fn put(&self, token: &StoredToken) -> Result<(), SecretError> {
+        let json = serde_json::to_string(token).map_err(|e| SecretError::Corrupt(e.to_string()))?;
+        Self::entry(&token.host)?
+            .set_password(&json)
+            .map_err(|e| SecretError::Keychain(e.to_string()))?;
+        let mut hosts = self.read_index();
+        if !hosts.contains(&token.host) {
+            hosts.push(token.host.clone());
+            hosts.sort();
+            self.write_index(&hosts)?;
+        }
+        Ok(())
+    }
+    fn delete(&self, host: &str) -> Result<(), SecretError> {
+        match Self::entry(host)?.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => {}
+            Err(e) => return Err(SecretError::Keychain(e.to_string())),
+        }
+        let hosts: Vec<String> = self
+            .read_index()
+            .into_iter()
+            .filter(|h| h != host)
+            .collect();
+        self.write_index(&hosts)
+    }
+    fn hosts(&self) -> Result<Vec<String>, SecretError> {
+        Ok(self.read_index())
+    }
+}
+
+/// The store to use on this machine: the keychain when it answers, else the 0600 file.
+/// Tokens found in the file are moved into the keychain the first time it is available.
+pub fn open_default(data_dir: &Path) -> Box<dyn SecretStore> {
+    let file = FileStore::new(data_dir.join("secrets.json"));
+    if !KeyringStore::probe() {
+        return Box::new(file);
+    }
+    let ring = KeyringStore::new(data_dir.join("secrets-index.json"));
+    if let Ok(hosts) = file.hosts() {
+        let mut moved = 0;
+        for h in hosts {
+            if let Ok(Some(t)) = file.get(&h) {
+                if ring.put(&t).is_ok() && file.delete(&h).is_ok() {
+                    moved += 1;
+                }
+            }
+        }
+        if moved > 0 {
+            let _ = std::fs::remove_file(data_dir.join("secrets.json"));
+        }
+    }
+    Box::new(ring)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -145,5 +261,24 @@ mod tests {
                 & 0o777;
             assert_eq!(mode, 0o600);
         }
+    }
+
+    #[test]
+    fn open_default_returns_a_working_store_on_any_machine() {
+        let d = tempfile::tempdir().unwrap();
+        let store = open_default(d.path());
+        store
+            .put(&StoredToken {
+                host: "example.org".into(),
+                login: "u".into(),
+                token: "t".into(),
+                kind: "pat".into(),
+                name: None,
+            })
+            .unwrap();
+        assert_eq!(store.get("example.org").unwrap().unwrap().token, "t");
+        assert_eq!(store.hosts().unwrap(), vec!["example.org"]);
+        store.delete("example.org").unwrap();
+        assert!(store.get("example.org").unwrap().is_none());
     }
 }

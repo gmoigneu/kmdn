@@ -21,7 +21,7 @@ use kmdn_core::provider::{
     RepoRef, RepoSummary, ReviewEvent, Side, User,
 };
 use kmdn_core::repo::{ProviderKind, RemoteInfo, Repo};
-use kmdn_core::secrets::{FileStore, SecretStore, StoredToken};
+use kmdn_core::secrets::{SecretStore, StoredToken};
 use kmdn_core::submit::{self, Draft, Submission};
 use kmdn_core::sync::{self, FastForward, RebaseOutcome, Token};
 use kmdn_core::worktree::{ThreadWorktree, BRANCH_PREFIX};
@@ -33,7 +33,7 @@ const GITHUB_CLIENT_ID: Option<&str> = option_env!("KMDN_GITHUB_CLIENT_ID");
 
 #[derive(Clone)]
 pub struct AppState {
-    secrets: Arc<FileStore>,
+    secrets: Arc<dyn SecretStore>,
     data_dir: PathBuf,
     agents: Arc<agents::Runtime>,
     /// App-local SQLite: unsaved editor text (D27). Never committed.
@@ -91,7 +91,7 @@ async fn blocking<T: Send + 'static>(
     tauri::async_runtime::spawn_blocking(f).await.map_err(err)?
 }
 
-fn token_for(secrets: &FileStore, remote: &RemoteInfo) -> Option<(StoredToken, Token)> {
+fn token_for(secrets: &dyn SecretStore, remote: &RemoteInfo) -> Option<(StoredToken, Token)> {
     let stored = secrets.get(&remote.host).ok().flatten()?;
     let token = match remote.provider {
         ProviderKind::GitHub => Token::github(&stored.token),
@@ -101,7 +101,7 @@ fn token_for(secrets: &FileStore, remote: &RemoteInfo) -> Option<(StoredToken, T
 }
 
 fn provider_for(
-    secrets: &FileStore,
+    secrets: &dyn SecretStore,
     remote: &RemoteInfo,
 ) -> Result<(Box<dyn Provider>, Token, RepoRef), String> {
     let (stored, token) =
@@ -1264,7 +1264,7 @@ fn provider_by_host(host: &str, token: &str) -> Box<dyn Provider> {
 
 /// Validates the token against the host, stores it, remembers the profile email.
 fn store_token(
-    secrets: &FileStore,
+    secrets: &dyn SecretStore,
     data_dir: &Path,
     host: &str,
     token: &str,
@@ -1336,7 +1336,7 @@ pub fn run() {
                 .or_else(|_| DraftStore::in_memory())
                 .expect("draft store");
             app.manage(AppState {
-                secrets: Arc::new(FileStore::new(dir.join("secrets.json"))),
+                secrets: Arc::from(kmdn_core::secrets::open_default(&dir)),
                 data_dir: dir,
                 agents: Arc::new(agents::Runtime::default()),
                 drafts: Arc::new(std::sync::Mutex::new(drafts)),
