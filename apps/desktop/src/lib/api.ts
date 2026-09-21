@@ -51,6 +51,7 @@ export interface Comment { id: number; author: string; body: string; created_at:
 export interface Issue { number: number; title: string; body: string; url: string; open: boolean }
 export interface Discussion { issue: Issue | null; comments: Comment[] }
 export interface Submission { pull: PullRequest; created: boolean; pushed_head: string; log_comment: Comment | null }
+export interface SubmitPreview { default_title: string; agent_log: string | null; post_agent_log: boolean; labels: string[]; existing_pull: number | null }
 export interface SubmitOutcome { submission: Submission | null; findings: Finding[]; error: string | null }
 export interface Mergeability { mergeable: boolean | null; state: string; approvals: number; changes_requested: boolean; checks_passing: boolean | null }
 export interface ReviewDetail { pull: PullRequest; changes: FileChange[]; comments: Comment[]; mergeability: Mergeability; head_sha: string }
@@ -154,8 +155,9 @@ export const api = {
   threadConflicts: (root: string, slug: string) => invoke<RebaseOutcome>("thread_conflicts", { root, slug }),
   resolveThreadConflicts: (root: string, slug: string, resolutions: Record<string, string>) =>
     invoke<RebaseOutcome>("resolve_thread_conflicts", { root, slug, resolutions }),
-  submitThread: (root: string, slug: string, title: string, summary: string | null) =>
-    invoke<SubmitOutcome>("submit_thread", { root, slug, title, summary }),
+  submitPreview: (root: string, slug: string) => invoke<SubmitPreview>("submit_preview", { root, slug }),
+  submitThread: (root: string, slug: string, title: string, summary: string | null, agentLog: string | null) =>
+    invoke<SubmitOutcome>("submit_thread", { root, slug, title, summary, agentLog }),
   listReviews: (root: string) => invoke<PullRequest[]>("list_reviews", { root }),
   docDiscussion: (root: string, path: string) => invoke<Discussion>("doc_discussion", { root, path }),
   docDiscussionComment: (root: string, path: string, body: string) => invoke<Discussion>("doc_discussion_comment", { root, path, body }),

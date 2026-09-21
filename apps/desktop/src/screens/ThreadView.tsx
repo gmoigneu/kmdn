@@ -33,6 +33,12 @@ export function ThreadView({ slug, initialPath, initialMode }: { slug: string; i
   const [submitOpen, setSubmitOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [summary, setSummary] = useState("");
+  const [agentLog, setAgentLog] = useState("");
+  const [postLog, setPostLog] = useState(true);
+  const preview = useQuery({ queryKey: ["submit-preview", root, slug], queryFn: () => api.submitPreview(root, slug), enabled: submitOpen });
+  useEffect(() => {
+    if (preview.data) { setAgentLog(preview.data.agent_log ?? ""); setPostLog(preview.data.post_agent_log && !!preview.data.agent_log); }
+  }, [preview.data]);
   const [outcome, setOutcome] = useState<SubmitOutcome | null>(null);
 
   const changes = useQuery({ queryKey: ["changes", root, slug], queryFn: () => api.threadChanges(root, slug), enabled: !!t });
@@ -59,7 +65,7 @@ export function ThreadView({ slug, initialPath, initialMode }: { slug: string; i
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["threads", root] }); go({ kind: "home" }); },
   });
   const submit = useMutation({
-    mutationFn: () => api.submitThread(root, slug, title.trim(), summary.trim() || null),
+    mutationFn: () => api.submitThread(root, slug, title.trim(), summary.trim() || null, postLog && agentLog.trim() ? agentLog : null),
     onSuccess: (o) => { setOutcome(o); if (o.submission) { setSubmitOpen(false); qc.invalidateQueries({ queryKey: ["reviews", root] }); qc.invalidateQueries({ queryKey: ["changes", root, slug] }); } },
     onError: (e) => setOutcome({ submission: null, findings: [], error: String(e) }),
   });
@@ -111,8 +117,18 @@ export function ThreadView({ slug, initialPath, initialMode }: { slug: string; i
 
       {submitOpen && (
         <div className="border-b border-border bg-bg-muted px-4 py-3 space-y-2">
-          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title (leave empty for an automatic one)" className="w-full h-8 px-2 rounded-md border border-border bg-bg text-sm" />
+          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={preview.data ? `Title (empty uses "${preview.data.default_title}")` : "Title (leave empty for an automatic one)"} className="w-full h-8 px-2 rounded-md border border-border bg-bg text-sm" />
           <textarea value={summary} onChange={(e) => setSummary(e.target.value)} rows={2} placeholder="Summary for reviewers (optional)" className="w-full rounded-md border border-border bg-bg p-2 text-sm resize-none" />
+          {preview.data?.agent_log && (
+            <div className="rounded-md border border-border bg-bg p-2 space-y-1">
+              <label className="flex items-center gap-2 text-xs">
+                <input type="checkbox" checked={postLog} onChange={(e) => setPostLog(e.target.checked)} />
+                Post how this change was made as a comment on the review. Edit it below or untick to keep it private.
+              </label>
+              <textarea value={agentLog} onChange={(e) => setAgentLog(e.target.value)} rows={Math.min(8, Math.max(3, agentLog.split("\n").length))} disabled={!postLog}
+                className="w-full rounded-md border border-border bg-bg-muted p-2 text-xs font-mono resize-none disabled:opacity-50" />
+            </div>
+          )}
           <div className="flex items-center gap-2">
             <button onClick={() => submit.mutate()} disabled={submit.isPending} className="h-7 px-3 rounded-md bg-accent text-accent-fg text-xs disabled:opacity-40">{submit.isPending ? "Submitting…" : pr ? "Update review" : "Open review"}</button>
             <button onClick={() => setSubmitOpen(false)} className="h-7 px-3 rounded-md border border-border text-xs">Cancel</button>

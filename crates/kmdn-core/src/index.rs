@@ -31,6 +31,34 @@ pub struct KbConfig {
     pub name: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
+    #[serde(default)]
+    pub review: ReviewConfig,
+}
+
+/// `.kmdn/config.yaml` `review:` section (04-content-model.md).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ReviewConfig {
+    #[serde(default = "default_labels")]
+    pub labels: Vec<String>,
+    /// Offer to post the condensed agent log as a PR comment at submit (D58).
+    #[serde(default = "default_true")]
+    pub post_agent_log: bool,
+}
+
+fn default_labels() -> Vec<String> {
+    vec!["kmdn".to_string()]
+}
+fn default_true() -> bool {
+    true
+}
+
+impl Default for ReviewConfig {
+    fn default() -> Self {
+        Self {
+            labels: default_labels(),
+            post_agent_log: true,
+        }
+    }
 }
 
 pub fn is_excluded_dir(name: &str) -> bool {
