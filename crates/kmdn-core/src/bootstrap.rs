@@ -120,7 +120,7 @@ mod tests {
         .unwrap();
         assert_eq!(repo.head().unwrap().shorthand(), Some("main"));
         assert!(dest.join("AGENTS.md").exists() && dest.join(".kmdn/config.yaml").exists());
-        assert!(crate::checks::run(&dest, &crate::checks::Options_::default_cap()).is_empty());
+        assert!(crate::checks::run(&dest, &crate::checks::CheckOptions::default_cap()).is_empty());
         assert_eq!(
             crate::index::read_config(&dest).name.as_deref(),
             Some("Team KB")

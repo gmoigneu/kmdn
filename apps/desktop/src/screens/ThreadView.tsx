@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { StatusPill } from "@/components/StatusPill";
+import { threadStatus } from "@/lib/status";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Bot, Check, ExternalLink, FilePlus, Link2, MoreHorizontal, RotateCcw, Save, SlidersHorizontal, Trash2 } from "lucide-react";
@@ -121,13 +123,13 @@ export function ThreadView({ slug, initialPath, initialMode, initialPrompt, init
 
   if (!t) return <div className="p-6 text-fg-muted">Loading thread…</div>;
   const n = changes.data?.length ?? 0;
-  const status = t.merged_at ? "done" : pr ? (pr.draft ? "draft" : "in review") : "draft";
+  const status = threadStatus(t, pr);
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
       <header className="h-11 shrink-0 border-b border-border flex items-center gap-3 px-4">
         <h1 className="font-medium truncate">{pr?.title ?? t.slug}</h1>
-        <span className={cn("text-[10px] px-1.5 rounded-full border border-border", t.merged_at ? "text-ok border-ok" : pr ? "text-accent border-accent" : "text-fg-muted")}>{status}</span>
+        <StatusPill status={status} />
         {pr && <button onClick={() => openUrl(pr.url)} className="text-xs text-fg-muted flex items-center gap-1 hover:text-fg"><ExternalLink size={11} /> #{pr.number}</button>}
         <span className="ml-auto" />
         {t.merged_at ? (

@@ -8,6 +8,8 @@ import { useUi } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { renderDiff, commentAnchor, groupRows, type RenderedRow } from "@/lib/rdiff/render";
 import { UnchangedRun } from "@/components/RenderedDiff";
+import { StatusPill } from "@/components/StatusPill";
+import { reviewStatus } from "@/lib/status";
 import { RenderedMarkdown } from "@/components/RenderedMarkdown";
 
 const statusLabel: Record<FileChange["status"], string> = { added: "A", modified: "M", deleted: "D", renamed: "R" };
@@ -77,7 +79,7 @@ export function ReviewView({ number }: { number: number }) {
       <header className="h-11 shrink-0 border-b border-border flex items-center gap-3 px-4">
         <span className="text-fg-muted tabular-nums text-xs">#{pull.number}</span>
         <h1 className="font-medium truncate">{pull.title}</h1>
-        <span className={cn("text-[10px] px-1.5 rounded-full border", pull.state === "merged" ? "border-ok text-ok" : "border-border text-fg-muted")}>{pull.state === "merged" ? "published" : pull.draft ? "draft" : "in review"}</span>
+        <StatusPill status={reviewStatus(pull)} />
         <span className="text-xs text-fg-muted">by {pull.author}</span>
         <span className="text-xs text-fg-muted">·</span>
         <span className="text-xs text-fg-muted" title={m.state}>

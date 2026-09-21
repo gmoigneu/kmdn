@@ -2,20 +2,23 @@
 //! MR maps to PR, notes to comments, discussions with a position to inline comments.
 //! Approval uses the native API when the instance allows it, otherwise a marker note.
 
-use reqwest::blocking::{Client, RequestBuilder, Response};
-use reqwest::header::{ACCEPT, USER_AGENT};
-use serde::de::DeserializeOwned;
+use std::ops::Deref;
+
+use reqwest::header::HeaderName;
 use serde_json::{json, Value};
 
+use super::http::{os, s, urlencode, JsonClient};
 use super::*;
 
-const UA: &str = "kmdn";
-
 pub struct GitLab {
-    client: Client,
-    /// e.g. https://gitlab.com/api/v4
-    api: String,
-    token: String,
+    http: JsonClient,
+}
+
+impl Deref for GitLab {
+    type Target = JsonClient;
+    fn deref(&self) -> &JsonClient {
+        &self.http
+    }
 }
 
 impl GitLab {
@@ -26,93 +29,20 @@ impl GitLab {
 
     pub fn with_api_url(api: &str, token: &str) -> Self {
         Self {
-            client: Client::new(),
-            api: api.trim_end_matches('/').to_string(),
-            token: token.to_string(),
+            http: JsonClient::new(
+                api,
+                vec![(HeaderName::from_static("private-token"), token.to_string())],
+            ),
         }
-    }
-
-    fn req(&self, rb: RequestBuilder) -> RequestBuilder {
-        rb.header(USER_AGENT, UA)
-            .header(ACCEPT, "application/json")
-            .header("PRIVATE-TOKEN", &self.token)
     }
 
     fn project(repo: &RepoRef) -> String {
         urlencode(&format!("{}/{}", repo.owner, repo.name))
     }
 
-    fn url(&self, path: &str) -> String {
-        format!("{}{}", self.api, path)
-    }
-
-    fn check(resp: Response) -> Result<Response> {
-        let status = resp.status();
-        if status.is_success() {
-            return Ok(resp);
-        }
-        let url = resp.url().to_string();
-        let body = resp.text().unwrap_or_default();
-        Err(ProviderError::Status {
-            status: status.as_u16(),
-            url,
-            body: body.chars().take(500).collect(),
-        })
-    }
-
-    fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
-        let resp = Self::check(self.req(self.client.get(self.url(path))).send()?)?;
-        resp.json::<T>()
-            .map_err(|e| ProviderError::Decode(e.to_string()))
-    }
-
-    fn send<T: DeserializeOwned>(&self, rb: RequestBuilder, body: &Value) -> Result<T> {
-        let resp = Self::check(self.req(rb).json(body).send()?)?;
-        resp.json::<T>()
-            .map_err(|e| ProviderError::Decode(e.to_string()))
-    }
-
-    fn post<T: DeserializeOwned>(&self, path: &str, body: &Value) -> Result<T> {
-        self.send(self.client.post(self.url(path)), body)
-    }
-
-    fn put<T: DeserializeOwned>(&self, path: &str, body: &Value) -> Result<T> {
-        self.send(self.client.put(self.url(path)), body)
-    }
-
-    fn all_pages<T: DeserializeOwned>(&self, path: &str) -> Result<Vec<T>> {
-        let mut out = Vec::new();
-        for page in 1..=20 {
-            let sep = if path.contains('?') { '&' } else { '?' };
-            let items: Vec<T> = self.get(&format!("{path}{sep}per_page=100&page={page}"))?;
-            let n = items.len();
-            out.extend(items);
-            if n < 100 {
-                break;
-            }
-        }
-        Ok(out)
-    }
-
     fn mr_path(repo: &RepoRef, iid: u64) -> String {
         format!("/projects/{}/merge_requests/{iid}", Self::project(repo))
     }
-}
-
-fn urlencode(s: &str) -> String {
-    url::form_urlencoded::byte_serialize(s.as_bytes())
-        .collect::<String>()
-        .replace('+', "%20")
-}
-
-fn s(v: &Value, k: &str) -> String {
-    v.get(k)
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string()
-}
-fn os(v: &Value, k: &str) -> Option<String> {
-    v.get(k).and_then(Value::as_str).map(str::to_string)
 }
 
 fn parse_mr(v: &Value) -> PullRequest {

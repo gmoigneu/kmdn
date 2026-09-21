@@ -176,7 +176,7 @@ fn golden_path_github() {
         "AGENTS.md should list the new document"
     );
     assert!(
-        kmdn_core::checks::run(&clone, &kmdn_core::checks::Options_::default_cap()).is_empty(),
+        kmdn_core::checks::run(&clone, &kmdn_core::checks::CheckOptions::default_cap()).is_empty(),
         "checks clean on main"
     );
 

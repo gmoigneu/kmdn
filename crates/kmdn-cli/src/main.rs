@@ -62,7 +62,7 @@ fn run() -> Result<ExitCode> {
         .with_context(|| format!("path not found: {}", cli.path.display()))?;
     match cli.cmd {
         Cmd::Check { asset_cap } => {
-            let findings = checks::run(&root, &checks::Options_ { asset_cap });
+            let findings = checks::run(&root, &checks::CheckOptions { asset_cap });
             if cli.json {
                 println!("{}", serde_json::to_string_pretty(&findings)?);
             } else if findings.is_empty() {

@@ -17,7 +17,6 @@
 //! - `search`: full-text search over titles and bodies in the app-local SQLite (D12, D33)
 //! - `secrets`: provider token storage
 //!
-//! Providers, the block-level conflict model, and agent adapters land in later issues.
 
 pub mod agents;
 pub mod bootstrap;

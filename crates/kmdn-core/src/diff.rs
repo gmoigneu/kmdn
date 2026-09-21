@@ -37,6 +37,59 @@ fn text_of(bytes: &[u8]) -> Option<String> {
     }
 }
 
+/// Builds a FileChange from a delta and the two sides' text.
+fn delta_to_change(
+    delta: &git2::DiffDelta<'_>,
+    old: Option<String>,
+    new: Option<String>,
+) -> Option<FileChange> {
+    let status = match delta.status() {
+        git2::Delta::Added | git2::Delta::Untracked => ChangeStatus::Added,
+        git2::Delta::Deleted => ChangeStatus::Deleted,
+        git2::Delta::Renamed => ChangeStatus::Renamed,
+        git2::Delta::Modified | git2::Delta::Typechange => ChangeStatus::Modified,
+        _ => return None,
+    };
+    let new_path = delta
+        .new_file()
+        .path()
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_default();
+    let old_path = delta
+        .old_file()
+        .path()
+        .map(|p| p.to_string_lossy().replace('\\', "/"));
+    let binary = delta.flags().is_binary()
+        || (old.is_none() && status != ChangeStatus::Added)
+        || (new.is_none() && status != ChangeStatus::Deleted);
+    Some(FileChange {
+        path: if status == ChangeStatus::Deleted {
+            old_path.clone().unwrap_or(new_path.clone())
+        } else {
+            new_path
+        },
+        old_path: if status == ChangeStatus::Renamed {
+            old_path
+        } else {
+            None
+        },
+        status,
+        old,
+        new,
+        binary,
+    })
+}
+
+fn status_of(delta: &git2::DiffDelta<'_>) -> Option<ChangeStatus> {
+    match delta.status() {
+        git2::Delta::Added | git2::Delta::Untracked => Some(ChangeStatus::Added),
+        git2::Delta::Deleted => Some(ChangeStatus::Deleted),
+        git2::Delta::Renamed => Some(ChangeStatus::Renamed),
+        git2::Delta::Modified | git2::Delta::Typechange => Some(ChangeStatus::Modified),
+        _ => None,
+    }
+}
+
 /// Changes in `worktree` versus its merge base with `base_ref` (e.g. `refs/remotes/origin/main`).
 pub fn thread_changes(worktree: &Path, base_ref: &str) -> Result<Vec<FileChange>, RepoError> {
     let repo = Repository::open(worktree)?;
@@ -59,22 +112,14 @@ pub fn thread_changes(worktree: &Path, base_ref: &str) -> Result<Vec<FileChange>
         .ok_or_else(|| git2::Error::from_str("no workdir"))?;
     let mut out = Vec::new();
     for delta in diff.deltas() {
-        let status = match delta.status() {
-            git2::Delta::Added | git2::Delta::Untracked => ChangeStatus::Added,
-            git2::Delta::Deleted => ChangeStatus::Deleted,
-            git2::Delta::Renamed => ChangeStatus::Renamed,
-            git2::Delta::Modified | git2::Delta::Typechange => ChangeStatus::Modified,
-            _ => continue,
+        let Some(status) = status_of(&delta) else {
+            continue;
         };
         let new_path = delta
             .new_file()
             .path()
             .map(|p| p.to_string_lossy().replace('\\', "/"))
             .unwrap_or_default();
-        let old_path = delta
-            .old_file()
-            .path()
-            .map(|p| p.to_string_lossy().replace('\\', "/"));
         let old = if status == ChangeStatus::Added {
             None
         } else {
@@ -91,25 +136,7 @@ pub fn thread_changes(worktree: &Path, base_ref: &str) -> Result<Vec<FileChange>
                 .ok()
                 .and_then(|b| text_of(&b))
         };
-        let binary = delta.flags().is_binary()
-            || (old.is_none() && status != ChangeStatus::Added)
-            || (new.is_none() && status != ChangeStatus::Deleted);
-        out.push(FileChange {
-            path: if status == ChangeStatus::Deleted {
-                old_path.clone().unwrap_or(new_path.clone())
-            } else {
-                new_path
-            },
-            old_path: if status == ChangeStatus::Renamed {
-                old_path
-            } else {
-                None
-            },
-            status,
-            old,
-            new,
-            binary,
-        });
+        out.extend(delta_to_change(&delta, old, new));
     }
     out.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(out)
@@ -121,12 +148,10 @@ pub fn changes_between(
     base_oid: git2::Oid,
     head_oid: git2::Oid,
 ) -> Result<Vec<FileChange>, RepoError> {
-    let base_commit = repo.find_commit(base_oid)?;
     let head_commit = repo.find_commit(head_oid)?;
     let merge_base = repo.merge_base(base_oid, head_oid).unwrap_or(base_oid);
     let base_tree = repo.find_commit(merge_base)?.tree()?;
     let head_tree = head_commit.tree()?;
-    let _ = base_commit;
     let mut diff = repo.diff_tree_to_tree(Some(&base_tree), Some(&head_tree), None)?;
     let mut find = git2::DiffFindOptions::new();
     find.renames(true);
@@ -139,22 +164,9 @@ pub fn changes_between(
     };
     let mut out = Vec::new();
     for delta in diff.deltas() {
-        let status = match delta.status() {
-            git2::Delta::Added => ChangeStatus::Added,
-            git2::Delta::Deleted => ChangeStatus::Deleted,
-            git2::Delta::Renamed => ChangeStatus::Renamed,
-            git2::Delta::Modified | git2::Delta::Typechange => ChangeStatus::Modified,
-            _ => continue,
+        let Some(status) = status_of(&delta) else {
+            continue;
         };
-        let new_path = delta
-            .new_file()
-            .path()
-            .map(|p| p.to_string_lossy().replace('\\', "/"))
-            .unwrap_or_default();
-        let old_path = delta
-            .old_file()
-            .path()
-            .map(|p| p.to_string_lossy().replace('\\', "/"));
         let old = if status == ChangeStatus::Added {
             None
         } else {
@@ -165,25 +177,7 @@ pub fn changes_between(
         } else {
             blob_text(&head_tree, delta.new_file().path())
         };
-        let binary = delta.flags().is_binary()
-            || (old.is_none() && status != ChangeStatus::Added)
-            || (new.is_none() && status != ChangeStatus::Deleted);
-        out.push(FileChange {
-            path: if status == ChangeStatus::Deleted {
-                old_path.clone().unwrap_or(new_path.clone())
-            } else {
-                new_path
-            },
-            old_path: if status == ChangeStatus::Renamed {
-                old_path
-            } else {
-                None
-            },
-            status,
-            old,
-            new,
-            binary,
-        });
+        out.extend(delta_to_change(&delta, old, new));
     }
     out.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(out)

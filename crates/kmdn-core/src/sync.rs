@@ -32,6 +32,14 @@ impl Token {
             secret: secret.into(),
         }
     }
+
+    /// Git credential for a provider kind.
+    pub fn for_kind(kind: &crate::repo::ProviderKind, secret: &str) -> Self {
+        match kind {
+            crate::repo::ProviderKind::GitHub => Self::github(secret),
+            _ => Self::gitlab(secret),
+        }
+    }
 }
 
 pub(crate) fn callbacks(token: Option<&Token>) -> RemoteCallbacks<'_> {
@@ -251,15 +259,6 @@ pub fn rebase_worktree_resolving(
                         .map_err(|e| git2::Error::from_str(&e.to_string()))?;
                     idx.add_path(Path::new(index::AGENTS_FILE))?;
                 }
-                idx.write()?;
-            } else if false {
-                // Derived file: regenerate from the merged tree and continue (D56).
-                let root = repo
-                    .workdir()
-                    .ok_or_else(|| git2::Error::from_str("no workdir"))?;
-                idx.remove_path(Path::new(index::AGENTS_FILE))?;
-                index::write_agents_md(root).map_err(|e| git2::Error::from_str(&e.to_string()))?;
-                idx.add_path(Path::new(index::AGENTS_FILE))?;
                 idx.write()?;
             } else {
                 rebase.abort()?;
