@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { Bot, Check, ExternalLink, FilePlus, MoreHorizontal, RotateCcw, Save, Trash2 } from "lucide-react";
+import { Bot, Check, ExternalLink, FilePlus, Link2, MoreHorizontal, RotateCcw, Save, SlidersHorizontal, Trash2 } from "lucide-react";
+import { readFrontmatter, relativeLink, setFrontmatterScalar } from "@/lib/frontmatter";
 import { api, type AgentKind, type AgentMode, type FileChange, type SubmitOutcome } from "@/lib/api";
 import { useUi } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -30,6 +31,25 @@ export function ThreadView({ slug, initialPath, initialMode, initialPrompt, init
   const [menu, setMenu] = useState(false);
   const [buffer, setBuffer] = useState("");
   const [dirty, setDirty] = useState(false);
+  const [linkPicker, setLinkPicker] = useState(false);
+  const [linkQuery, setLinkQuery] = useState("");
+  const [showProps, setShowProps] = useState(false);
+  const insertRef = useRef<((text: string) => void) | null>(null);
+  const fm = readFrontmatter(buffer);
+  const setField = (key: string, value: string) => { setBuffer((b) => setFrontmatterScalar(b, key, value)); setDirty(true); };
+  const onImage = async (file: File): Promise<string | null> => {
+    if (!openPath) return null;
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    let bin = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    try { return await api.saveAsset(root, slug, openPath, file.name, btoa(bin)); }
+    catch (e) { window.alert(String(e)); return null; }
+  };
+  const pickLink = (targetPath: string, title: string) => {
+    if (!openPath) return;
+    insertRef.current?.(`[${title}](${relativeLink(openPath, targetPath)})`);
+    setLinkPicker(false); setLinkQuery("");
+  };
   const [submitOpen, setSubmitOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [summary, setSummary] = useState("");
@@ -197,7 +217,11 @@ export function ThreadView({ slug, initialPath, initialMode, initialPrompt, init
             ))}
             <span className="ml-auto" />
             {tab === "editor" && openPath && (
-              <button onClick={() => save.mutate()} disabled={!dirty || save.isPending} className="h-7 px-2 rounded-md border border-border flex items-center gap-1 disabled:opacity-40"><Save size={12} /> Save</button>
+              <>
+                <button onClick={() => setShowProps((p) => !p)} className={cn("h-7 px-2 rounded-md border border-border flex items-center gap-1", showProps && "bg-bg-muted")} title="Frontmatter properties"><SlidersHorizontal size={12} /> Properties</button>
+                <button onClick={() => setLinkPicker((p) => !p)} className="h-7 px-2 rounded-md border border-border flex items-center gap-1" title="Insert a link to another document (Ctrl/Cmd-Shift-L)"><Link2 size={12} /> Link</button>
+                <button onClick={() => save.mutate()} disabled={!dirty || save.isPending} className="h-7 px-2 rounded-md border border-border flex items-center gap-1 disabled:opacity-40"><Save size={12} /> Save</button>
+              </>
             )}
             <button onClick={newDocument} className="h-7 px-2 rounded-md border border-border flex items-center gap-1" title="New document"><FilePlus size={12} /> New</button>
           </div>
@@ -246,7 +270,37 @@ export function ThreadView({ slug, initialPath, initialMode, initialPrompt, init
                     <button onClick={() => api.draftClear(root, slug, openPath!).then(() => qc.invalidateQueries({ queryKey: ["draft", root, slug, openPath] }))} className="h-6 px-2 rounded-md border border-border">Discard</button>
                   </div>
                 )}
-                <MarkdownEditor key={openPath} value={buffer} onChange={(next) => { setBuffer(next); setDirty(true); }} onSave={() => { if (dirty) save.mutate(); }} className="flex-1 min-h-0 overflow-hidden" />
+                {showProps && (
+                  <div className="px-3 py-2 border-b border-border bg-bg-muted grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs items-center">
+                    <span className="text-fg-muted">title</span><input value={fm.fields.title ?? ""} onChange={(e) => setField("title", e.target.value)} className="h-6 px-2 rounded-md border border-border bg-bg" />
+                    <span className="text-fg-muted">description</span><input value={fm.fields.description ?? ""} onChange={(e) => setField("description", e.target.value)} className="h-6 px-2 rounded-md border border-border bg-bg" />
+                    <span className="text-fg-muted">status</span>
+                    <select value={fm.fields.status ?? ""} onChange={(e) => setField("status", e.target.value)} className="h-6 px-1 rounded-md border border-border bg-bg w-40">
+                      <option value="">(none)</option>{["draft", "review", "published", "deprecated"].map((o) => <option key={o} value={o}>{o}</option>)}
+                    </select>
+                    <span className="text-fg-muted">owner</span><input value={fm.fields.owner ?? ""} onChange={(e) => setField("owner", e.target.value)} placeholder="@handle" className="h-6 px-2 rounded-md border border-border bg-bg w-60" />
+                    <span className="text-fg-muted">tags</span><input value={(fm.fields.tags ?? "").replace(/^\[|\]$/g, "")} onChange={(e) => setField("tags", e.target.value.trim() ? `[${e.target.value}]` : "")} placeholder="ops, deploy" className="h-6 px-2 rounded-md border border-border bg-bg" />
+                    <span className="text-fg-muted">reviewed</span><input value={fm.fields.reviewed ?? ""} onChange={(e) => setField("reviewed", e.target.value)} placeholder="2026-09-21" className="h-6 px-2 rounded-md border border-border bg-bg w-40" />
+                  </div>
+                )}
+                {linkPicker && (
+                  <div className="px-3 py-2 border-b border-border bg-bg-muted text-xs">
+                    <input autoFocus value={linkQuery} onChange={(e) => setLinkQuery(e.target.value)} placeholder="Link to a document: type a title or path, Enter inserts, Esc closes"
+                      onKeyDown={(e) => {
+                        const first = (docs.data ?? []).filter((d) => d.path !== openPath && (d.title + " " + d.path).toLowerCase().includes(linkQuery.toLowerCase()))[0];
+                        if (e.key === "Enter" && first) pickLink(first.path, first.title);
+                        if (e.key === "Escape") { setLinkPicker(false); setLinkQuery(""); }
+                      }}
+                      className="w-full h-7 px-2 rounded-md border border-border bg-bg" />
+                    <ul className="mt-1 max-h-40 overflow-y-auto">
+                      {(docs.data ?? []).filter((d) => d.path !== openPath && (d.title + " " + d.path).toLowerCase().includes(linkQuery.toLowerCase())).slice(0, 12).map((d) => (
+                        <li key={d.path}><button onClick={() => pickLink(d.path, d.title)} className="w-full text-left px-2 py-0.5 rounded hover:bg-bg-elevated flex gap-2"><span>{d.title}</span><span className="text-fg-muted font-mono truncate">{d.path}</span></button></li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                <MarkdownEditor key={openPath} value={buffer} onChange={(next) => { setBuffer(next); setDirty(true); }} onSave={() => { if (dirty) save.mutate(); }}
+                  onImage={onImage} onLinkPicker={() => setLinkPicker(true)} registerInsert={(fn) => { insertRef.current = fn; }} className="flex-1 min-h-0 overflow-hidden" />
                 {save.error && <p className="px-3 py-1 text-danger text-xs">{String(save.error)}</p>}
               </div>
             ) : (
