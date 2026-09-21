@@ -7,7 +7,8 @@ import "./styles.css";
 
 initAppearance();
 
-const qc = new QueryClient({ defaultOptions: { queries: { staleTime: 5_000, retry: 1 } } });
+// The sync loop drives freshness (D31); queries do not refetch on their own on focus or mount.
+const qc = new QueryClient({ defaultOptions: { queries: { staleTime: 60_000, retry: 1, refetchOnWindowFocus: false } } });
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

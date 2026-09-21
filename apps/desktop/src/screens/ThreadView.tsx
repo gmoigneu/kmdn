@@ -66,7 +66,8 @@ export function ThreadView({ slug, initialPath, initialMode, initialPrompt, init
       setDirty(false);
       qc.invalidateQueries({ queryKey: ["draft", root, slug, openPath] });
       qc.invalidateQueries({ queryKey: ["changes", root, slug] });
-      qc.invalidateQueries({ queryKey: ["wt-docs", t?.path] });
+      // The worktree document list changes only when a new file appears (review P3).
+      if (!docs.data?.some((d) => d.path === openPath)) qc.invalidateQueries({ queryKey: ["wt-docs", t?.path] });
       qc.invalidateQueries({ queryKey: ["wt-file", t?.path, openPath] });
     },
   });

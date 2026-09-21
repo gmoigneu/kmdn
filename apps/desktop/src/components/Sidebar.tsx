@@ -31,11 +31,15 @@ function useSyncLoop(root: string) {
         if ("Ok" in outcome && typeof outcome.Ok === "object" && "Conflicts" in outcome.Ok) setConflicts(slug, outcome.Ok.Conflicts);
         else if ("Ok" in outcome) setConflicts(slug, null);
       }
+      // Invalidate only what the report says moved (review P3): a full document scan costs
+      // seconds at 5,000 documents, so it runs only when main actually advanced.
+      const mainMoved = report.main !== "UpToDate" && !(typeof report.main === "object" && "Skipped" in report.main);
+      const rebased = report.threads.filter(([, o]) => "Ok" in o && typeof o.Ok === "object" && "Rebased" in o.Ok).map(([slug]) => slug);
       qc.invalidateQueries({ queryKey: ["threads", root] });
-      qc.invalidateQueries({ queryKey: ["docs", root] });
       qc.invalidateQueries({ queryKey: ["local", root] });
-      qc.invalidateQueries({ queryKey: ["changes", root] });
       qc.invalidateQueries({ queryKey: ["reviews", root] });
+      if (mainMoved) qc.invalidateQueries({ queryKey: ["docs", root] });
+      for (const slug of rebased) { qc.invalidateQueries({ queryKey: ["changes", root, slug] }); qc.invalidateQueries({ queryKey: ["wt-docs"] }); }
     },
   });
   useEffect(() => {
@@ -65,8 +69,8 @@ export function Sidebar() {
   const qc = useQueryClient();
   const threads = useQuery({ queryKey: ["threads", root], queryFn: () => api.listThreads(root) });
   const docs = useQuery({ queryKey: ["docs", root], queryFn: () => api.listDocuments(root) });
-  const local = useQuery({ queryKey: ["local", root], queryFn: () => api.localChanges(root), refetchInterval: 5_000 });
-  const reviews = useQuery({ queryKey: ["reviews", root], queryFn: () => api.listReviews(root), enabled: kb!.authenticated, refetchInterval: 60_000, retry: false });
+  const local = useQuery({ queryKey: ["local", root], queryFn: () => api.localChanges(root), refetchInterval: 30_000 });
+  const reviews = useQuery({ queryKey: ["reviews", root], queryFn: () => api.listReviews(root), enabled: kb!.authenticated, retry: false });
   const seen = useRef<Set<number> | null>(null);
   useEffect(() => {
     if (!reviews.data) return;
