@@ -56,14 +56,23 @@ impl FileStore {
             std::fs::create_dir_all(p)?;
         }
         let tmp = self.path.with_extension("tmp");
-        std::fs::write(
-            &tmp,
-            serde_json::to_vec_pretty(map).map_err(|e| SecretError::Corrupt(e.to_string()))?,
-        )?;
+        // Never follow a pre-existing file or symlink at the temp path, and create the file
+        // with 0600 from the start so it is never world-readable, even briefly (review S9).
+        let _ = std::fs::remove_file(&tmp);
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create_new(true);
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))?;
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        {
+            use std::io::Write;
+            let mut f = opts.open(&tmp)?;
+            f.write_all(
+                &serde_json::to_vec_pretty(map).map_err(|e| SecretError::Corrupt(e.to_string()))?,
+            )?;
+            f.sync_all()?;
         }
         std::fs::rename(&tmp, &self.path)?;
         Ok(())
