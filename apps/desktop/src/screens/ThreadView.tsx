@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { ExternalLink, FilePlus, MoreHorizontal, Save, Trash2 } from "lucide-react";
+import { Bot, Check, ExternalLink, FilePlus, MoreHorizontal, RotateCcw, Save, Trash2 } from "lucide-react";
 import { api, type AgentMode, type FileChange, type SubmitOutcome } from "@/lib/api";
 import { useUi } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -36,6 +36,11 @@ export function ThreadView({ slug, initialPath, initialMode }: { slug: string; i
   const [outcome, setOutcome] = useState<SubmitOutcome | null>(null);
 
   const changes = useQuery({ queryKey: ["changes", root, slug], queryFn: () => api.threadChanges(root, slug), enabled: !!t });
+  const pending = useQuery({ queryKey: ["pending", root, slug], queryFn: () => api.agentPending(root, slug), enabled: !!t });
+  const pendingSet = new Set(pending.data ?? []);
+  const refreshChanges = () => { qc.invalidateQueries({ queryKey: ["changes", root, slug] }); qc.invalidateQueries({ queryKey: ["pending", root, slug] }); qc.invalidateQueries({ queryKey: ["wt-docs", t?.path] }); qc.invalidateQueries({ queryKey: ["wt-file", t?.path] }); };
+  const accept = useMutation({ mutationFn: (paths: string[]) => api.agentAccept(root, slug, paths), onSuccess: refreshChanges });
+  const revert = useMutation({ mutationFn: (paths: string[]) => api.agentRevert(root, slug, paths), onSuccess: refreshChanges });
   const docs = useQuery({ queryKey: ["wt-docs", t?.path], queryFn: () => api.listDocuments(t!.path), enabled: !!t });
   const file = useQuery({ queryKey: ["wt-file", t?.path, openPath], queryFn: () => api.readDocument(t!.path, openPath!), enabled: !!t && !!openPath });
   useEffect(() => { if (file.data != null && !dirty) setBuffer(file.data); }, [file.data, dirty]);
@@ -85,8 +90,8 @@ export function ThreadView({ slug, initialPath, initialMode }: { slug: string; i
         {pr ? (
           <button onClick={() => go({ kind: "review", number: pr.number })} className="h-7 px-3 rounded-md bg-accent text-accent-fg text-xs">View review</button>
         ) : (
-          <button disabled={n === 0 || !kb!.authenticated} onClick={() => { setTitle(""); setOutcome(null); setSubmitOpen(true); }}
-            className="h-7 px-3 rounded-md bg-accent text-accent-fg text-xs disabled:opacity-40" title={!kb!.authenticated ? "Sign in first" : ""}>
+          <button disabled={n === 0 || !kb!.authenticated || pendingSet.size > 0} onClick={() => { setTitle(""); setOutcome(null); setSubmitOpen(true); }}
+            className="h-7 px-3 rounded-md bg-accent text-accent-fg text-xs disabled:opacity-40" title={!kb!.authenticated ? "Sign in first" : pendingSet.size > 0 ? "Accept or revert the agent's edits first" : ""}>
             Submit for review
           </button>
         )}
@@ -140,7 +145,7 @@ export function ThreadView({ slug, initialPath, initialMode }: { slug: string; i
       ) : (
       <div className="flex-1 flex min-h-0">
         <section className="w-[38%] min-w-[320px] border-r border-border flex flex-col">
-          <AgentPanel root={root} slug={slug} branch={t.branch} initialMode={initialMode} onChanged={() => { qc.invalidateQueries({ queryKey: ["changes", root, slug] }); qc.invalidateQueries({ queryKey: ["wt-docs", t.path] }); qc.invalidateQueries({ queryKey: ["wt-file", t.path] }); }} />
+          <AgentPanel root={root} slug={slug} branch={t.branch} initialMode={initialMode} onChanged={() => { qc.invalidateQueries({ queryKey: ["changes", root, slug] }); qc.invalidateQueries({ queryKey: ["pending", root, slug] }); qc.invalidateQueries({ queryKey: ["wt-docs", t.path] }); qc.invalidateQueries({ queryKey: ["wt-file", t.path] }); }} />
         </section>
         <section className="flex-1 flex flex-col min-w-0">
           <div className="h-9 border-b border-border flex items-center px-2 gap-1 text-xs">
@@ -159,12 +164,31 @@ export function ThreadView({ slug, initialPath, initialMode }: { slug: string; i
             {tab === "changes" && (
               <div className="p-4 space-y-6">
                 {n === 0 && <p className="text-fg-muted text-xs">No changes yet. Open a document in the Editor tab and save.</p>}
+                {pendingSet.size > 0 && (
+                  <div className="rounded-md border border-warn/50 bg-bg-muted px-3 py-2 text-xs flex items-center gap-2">
+                    <Bot size={12} className="text-warn" />
+                    <span>{pendingSet.size} agent edit{pendingSet.size === 1 ? "" : "s"} waiting for your review. Accepted edits are committed under the agent's name; reverted ones are restored.</span>
+                    <span className="ml-auto" />
+                    <button onClick={() => accept.mutate([...pendingSet])} disabled={accept.isPending} className="h-6 px-2 rounded-md bg-accent text-accent-fg flex items-center gap-1 disabled:opacity-40"><Check size={11} /> Accept all</button>
+                    <button onClick={() => { if (window.confirm("Revert every pending agent edit?")) revert.mutate([...pendingSet]); }} disabled={revert.isPending} className="h-6 px-2 rounded-md border border-border flex items-center gap-1 disabled:opacity-40"><RotateCcw size={11} /> Revert all</button>
+                  </div>
+                )}
                 {changes.data?.map((c) => (
-                  <div key={c.path} className="rounded-md border border-border">
-                    <button onClick={() => openInEditor(c.path)} className="w-full flex items-center gap-2 px-3 h-8 border-b border-border text-xs font-mono hover:bg-bg-muted text-left">
-                      <span className={cn("w-4 text-center", c.status === "added" ? "text-ok" : c.status === "deleted" ? "text-danger" : "text-warn")}>{statusLabel[c.status]}</span>
-                      <span className="truncate">{c.path}</span>
-                    </button>
+                  <div key={c.path} className={cn("rounded-md border", pendingSet.has(c.path) ? "border-warn/60" : "border-border")}>
+                    <div className="flex items-center gap-2 px-3 h-8 border-b border-border text-xs font-mono">
+                      <button onClick={() => openInEditor(c.path)} className="flex items-center gap-2 min-w-0 hover:underline text-left">
+                        <span className={cn("w-4 text-center", c.status === "added" ? "text-ok" : c.status === "deleted" ? "text-danger" : "text-warn")}>{statusLabel[c.status]}</span>
+                        <span className="truncate">{c.path}</span>
+                      </button>
+                      {pendingSet.has(c.path) && (
+                        <>
+                          <span className="text-[10px] px-1.5 rounded-full border border-warn/60 text-warn font-sans">agent edit</span>
+                          <span className="ml-auto" />
+                          <button onClick={() => accept.mutate([c.path])} disabled={accept.isPending} className="h-6 px-2 rounded-md bg-accent text-accent-fg font-sans flex items-center gap-1 disabled:opacity-40"><Check size={11} /> Accept</button>
+                          <button onClick={() => revert.mutate([c.path])} disabled={revert.isPending} className="h-6 px-2 rounded-md border border-border font-sans flex items-center gap-1 disabled:opacity-40"><RotateCcw size={11} /> Revert</button>
+                        </>
+                      )}
+                    </div>
                     <div className="py-2"><RenderedDiff change={c} /></div>
                   </div>
                 ))}

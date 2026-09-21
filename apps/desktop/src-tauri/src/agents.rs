@@ -53,8 +53,47 @@ pub struct Session {
     pub log: Mutex<CondensedLog>,
     turn_events: Mutex<Vec<AgentEvent>>,
     transcript: PathBuf,
-    /// Codex: pending request id -> item id is inside CodexState. Others: nothing to keep.
     prompt_counter: Mutex<u64>,
+    policy: Arc<Policy>,
+    /// Tool call id -> paths, for writes that have started but not finished.
+    writes_in_flight: Mutex<HashMap<String, Vec<String>>>,
+    pending_file: PathBuf,
+}
+
+/// Agent edits waiting for the user's accept or revert (D15). Persisted per thread so a
+/// restart does not lose them, and readable without a running session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PendingEdits {
+    pub agent: Option<AgentKind>,
+    pub request: String,
+    pub paths: Vec<String>,
+}
+
+pub fn session_dir(data_dir: &Path, slug: &str) -> PathBuf {
+    data_dir.join("agent-sessions").join(slug)
+}
+
+pub fn read_pending(data_dir: &Path, slug: &str) -> PendingEdits {
+    std::fs::read_to_string(session_dir(data_dir, slug).join("pending.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+pub fn write_pending(data_dir: &Path, slug: &str, p: &PendingEdits) {
+    let dir = session_dir(data_dir, slug);
+    let _ = std::fs::create_dir_all(&dir);
+    if let Ok(json) = serde_json::to_vec_pretty(p) {
+        let _ = std::fs::write(dir.join("pending.json"), json);
+    }
+}
+
+/// Drops `paths` from the pending list after an accept or revert.
+pub fn clear_pending(data_dir: &Path, slug: &str, paths: &[String]) -> PendingEdits {
+    let mut p = read_pending(data_dir, slug);
+    p.paths.retain(|x| !paths.contains(x));
+    write_pending(data_dir, slug, &p);
+    p
 }
 
 #[derive(Default)]
@@ -131,7 +170,7 @@ impl Runtime {
         self.stop(slug).await;
         let bin = which(kind.binary())
             .ok_or_else(|| format!("{} is not installed or not on PATH", kind.binary()))?;
-        let session_dir = data_dir.join("agent-sessions").join(slug);
+        let session_dir = session_dir(data_dir, slug);
         std::fs::create_dir_all(&session_dir).map_err(|e| e.to_string())?;
         let mut cmd = Command::new(&bin);
         cmd.current_dir(worktree)
@@ -162,6 +201,11 @@ impl Runtime {
         let stdout = child.stdout.take().ok_or("no stdout")?;
         let stderr = child.stderr.take();
 
+        let policy = Arc::new(Policy {
+            mode,
+            allowed: allowed_set(agents::AGENT_ALLOWED).map_err(|e| e.to_string())?,
+            worktree: worktree.to_path_buf(),
+        });
         let session = Arc::new(Session {
             kind,
             mode,
@@ -174,6 +218,9 @@ impl Runtime {
             turn_events: Mutex::new(Vec::new()),
             transcript: session_dir.join("transcript.jsonl"),
             prompt_counter: Mutex::new(0),
+            policy: policy.clone(),
+            writes_in_flight: Mutex::new(HashMap::new()),
+            pending_file: session_dir.join("pending.json"),
         });
         self.sessions
             .lock()
@@ -207,11 +254,6 @@ impl Runtime {
         }
 
         // stdout pump
-        let policy = Policy {
-            mode,
-            allowed: allowed_set(agents::AGENT_ALLOWED).map_err(|e| e.to_string())?,
-            worktree: worktree.to_path_buf(),
-        };
         let s2 = session.clone();
         let app2 = app.clone();
         tauri::async_runtime::spawn(async move {
@@ -224,6 +266,7 @@ impl Runtime {
                 };
                 for ev in events {
                     s2.record(&ev);
+                    s2.track_write(&ev);
                     if let AgentEvent::SessionStarted { session_id } = &ev {
                         *s2.session_id.lock().unwrap() = Some(session_id.clone());
                     }
@@ -303,6 +346,7 @@ impl Runtime {
 
     pub async fn send(&self, slug: &str, text: &str) -> Result<(), String> {
         let s = self.get(slug)?;
+        s.remember_request(text);
         let line = match s.kind {
             AgentKind::Claude => agents::claude::user_message(text),
             AgentKind::Codex => {
@@ -423,12 +467,70 @@ impl Session {
         self.write_line(&line).await
     }
 
+    fn pending(&self) -> PendingEdits {
+        std::fs::read_to_string(&self.pending_file)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
+    }
+
+    fn save_pending(&self, p: &PendingEdits) {
+        if let Ok(json) = serde_json::to_vec_pretty(p) {
+            let _ = std::fs::write(&self.pending_file, json);
+        }
+    }
+
+    fn remember_request(&self, text: &str) {
+        let mut p = self.pending();
+        p.agent = Some(self.kind);
+        p.request = text
+            .lines()
+            .next()
+            .unwrap_or("")
+            .chars()
+            .take(120)
+            .collect();
+        self.save_pending(&p);
+    }
+
+    /// Writes that completed successfully become pending edits (D15).
+    fn track_write(&self, ev: &AgentEvent) {
+        match ev {
+            AgentEvent::ToolCallStarted {
+                id,
+                kind: ToolKind::Write,
+                paths,
+                ..
+            } => {
+                self.writes_in_flight
+                    .lock()
+                    .unwrap()
+                    .insert(id.clone(), paths.clone());
+            }
+            AgentEvent::ToolCallFinished { id, ok, .. } => {
+                let paths = self.writes_in_flight.lock().unwrap().remove(id);
+                if let (Some(paths), true) = (paths, *ok) {
+                    let mut p = self.pending();
+                    p.agent = Some(self.kind);
+                    for raw in paths {
+                        if let Some(rel) = self.policy.relative(&raw) {
+                            if !p.paths.contains(&rel) {
+                                p.paths.push(rel);
+                            }
+                        }
+                    }
+                    self.save_pending(&p);
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn record(&self, ev: &AgentEvent) {
         self.turn_events.lock().unwrap().push(ev.clone());
         if !matches!(ev, AgentEvent::TextDelta { .. }) {
             self.append_transcript(&serde_json::to_value(ev).unwrap_or_default());
         }
-        let _ = ToolKind::Read; // keep the import meaningful for readers of this file
     }
 
     fn append_transcript(&self, v: &serde_json::Value) {
