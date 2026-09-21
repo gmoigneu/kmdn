@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ClipboardCopy, FileText, GitPullRequest, Layers, Palette, Plus, RefreshCw, Search } from "lucide-react";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { api } from "@/lib/api";
+import { api, type SearchHit } from "@/lib/api";
 import { useUi } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { useAppearance } from "@/lib/appearance";
@@ -18,6 +18,12 @@ export function CommandPalette() {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [cursor, setCursor] = useState(0);
+  const [hits, setHits] = useState<SearchHit[]>([]);
+  useEffect(() => {
+    if (!root || !open || q.trim().length < 3) { setHits([]); return; }
+    const t = setTimeout(() => { api.searchDocs(root, q).then(setHits).catch(() => setHits([])); }, 150);
+    return () => clearTimeout(t);
+  }, [q, root, open]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -55,13 +61,15 @@ export function CommandPalette() {
     for (const t of threads.data ?? []) list.push({ id: `t:${t.slug}`, group: "Threads", label: t.slug, hint: t.branch, icon: Layers, run: () => go({ kind: "thread", slug: t.slug }) });
     for (const p of reviews.data ?? []) list.push({ id: `r:${p.number}`, group: "Reviews", label: p.title, hint: `#${p.number} by ${p.author}`, icon: GitPullRequest, run: () => go({ kind: "review", number: p.number }) });
     for (const d of docs.data ?? []) list.push({ id: `d:${d.path}`, group: "Documents", label: d.title, hint: d.path, icon: FileText, run: () => go({ kind: "document", path: d.path }) });
+    for (const h of hits) list.push({ id: `s:${h.path}`, group: "In documents", label: h.title, hint: h.snippet.replace(/\s+/g, " "), icon: Search, run: () => go({ kind: "document", path: h.path }) });
     return list;
-  }, [root, q, threads.data, reviews.data, docs.data, go, toggleSidebar, openAppearance, newThread, sync, addCi]);
+  }, [root, q, threads.data, reviews.data, docs.data, go, toggleSidebar, openAppearance, newThread, sync, addCi, hits]);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     if (!needle) return entries.slice(0, 40);
     const score = (e: Entry) => {
+      if (e.group === "In documents") return 1.5;
       const hay = `${e.label} ${e.hint ?? ""} ${e.group}`.toLowerCase();
       if (hay.startsWith(needle)) return 3;
       if (e.label.toLowerCase().includes(needle)) return 2;

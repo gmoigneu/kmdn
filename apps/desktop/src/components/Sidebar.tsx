@@ -38,7 +38,7 @@ function useSyncLoop(root: string) {
       qc.invalidateQueries({ queryKey: ["threads", root] });
       qc.invalidateQueries({ queryKey: ["local", root] });
       qc.invalidateQueries({ queryKey: ["reviews", root] });
-      if (mainMoved) qc.invalidateQueries({ queryKey: ["docs", root] });
+      if (mainMoved) { qc.invalidateQueries({ queryKey: ["docs", root] }); api.reindexKb(root).catch(() => {}); }
       for (const slug of rebased) { qc.invalidateQueries({ queryKey: ["changes", root, slug] }); qc.invalidateQueries({ queryKey: ["wt-docs"] }); }
     },
   });
@@ -83,6 +83,8 @@ export function Sidebar() {
     }
   }, [reviews.data, kb]);
   const sync = useSyncLoop(root);
+  // Background full-text index (D33): the tree is already on screen when this runs.
+  useEffect(() => { api.reindexKb(root).catch(() => {}); }, [root]);
   const move = useMutation({
     mutationFn: () => api.moveLocalChangesToThread(root, "local-changes"),
     onSuccess: (t) => { qc.invalidateQueries({ queryKey: ["threads", root] }); qc.invalidateQueries({ queryKey: ["local", root] }); go({ kind: "thread", slug: t.slug }); },
