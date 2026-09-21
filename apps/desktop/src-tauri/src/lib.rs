@@ -582,6 +582,7 @@ async fn sync_now(state: State<'_, AppState>, root: String) -> Result<SyncReport
         let token = token_for(&secrets, &remote).map(|(_, t)| t);
         sync::fetch(repo.git(), "origin", token.as_ref()).map_err(err)?;
         let main = sync::fast_forward_default(&repo).map_err(err)?;
+        tracing::info!(?main, "sync");
         let base = base_ref(&repo)?;
         let mut threads = Vec::new();
         let mut pushed = Vec::new();
@@ -1163,6 +1164,110 @@ fn draft_list(
         .map_err(err)
 }
 
+// ---------- diagnostics (D35): local log, no telemetry
+
+static LOG_GUARD: std::sync::OnceLock<tracing_appender::non_blocking::WorkerGuard> =
+    std::sync::OnceLock::new();
+
+/// Daily-rotated log under `<app data>/logs`, INFO by default, `KMDN_LOG` overrides.
+fn init_logging(dir: &Path) {
+    use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+    let logs = dir.join("logs");
+    let _ = std::fs::create_dir_all(&logs);
+    let file = tracing_appender::rolling::daily(&logs, "kmdn.log");
+    let (writer, guard) = tracing_appender::non_blocking(file);
+    let filter = EnvFilter::try_from_env("KMDN_LOG").unwrap_or_else(|_| EnvFilter::new("info"));
+    let _ = tracing_subscriber::registry()
+        .with(filter)
+        .with(fmt::layer().with_ansi(false).with_writer(writer))
+        .try_init();
+    let _ = LOG_GUARD.set(guard);
+}
+
+/// Home directory replaced so paths do not identify the user; document text is never logged.
+fn scrub(text: &str) -> String {
+    match std::env::var("HOME") {
+        Ok(home) if !home.is_empty() => text.replace(&home, "~"),
+        _ => text.to_string(),
+    }
+}
+
+/// Text for the "Copy diagnostics" action: version, platform, signed-in hosts (no tokens),
+/// detected agents, and the last 200 log lines.
+#[tauri::command]
+async fn diagnostics(state: State<'_, AppState>) -> Result<String, String> {
+    let st = state.inner().clone();
+    let agents = agents::detect().await;
+    blocking(move || {
+        let mut out = String::new();
+        out.push_str(&format!("kmdn {}\n", env!("CARGO_PKG_VERSION")));
+        out.push_str(&format!(
+            "os: {} {}\n",
+            std::env::consts::OS,
+            std::env::consts::ARCH
+        ));
+        out.push_str(&format!(
+            "data dir: {}\n",
+            scrub(&st.data_dir.to_string_lossy())
+        ));
+        out.push_str("signed in: ");
+        let hosts: Vec<String> = st
+            .secrets
+            .hosts()
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|h| st.secrets.get(&h).ok().flatten())
+            .map(|t| format!("{}@{} ({})", t.login, t.host, t.kind))
+            .collect();
+        let hosts_line = if hosts.is_empty() {
+            "none".to_string()
+        } else {
+            hosts.join(", ")
+        };
+        out.push_str(&hosts_line);
+        out.push('\n');
+        out.push_str("agents: ");
+        let ag: Vec<String> = agents
+            .iter()
+            .map(|a| {
+                format!(
+                    "{} {}",
+                    a.kind.binary(),
+                    if a.available {
+                        a.version.clone().unwrap_or_else(|| "installed".into())
+                    } else {
+                        "missing".into()
+                    }
+                )
+            })
+            .collect();
+        out.push_str(&ag.join(", "));
+        out.push_str("\n\n--- last log lines ---\n");
+        let logs = st.data_dir.join("logs");
+        let mut files: Vec<PathBuf> = std::fs::read_dir(&logs)
+            .map(|d| d.flatten().map(|e| e.path()).collect())
+            .unwrap_or_default();
+        files.sort();
+        let mut lines: Vec<String> = Vec::new();
+        for f in files.iter().rev().take(2).rev() {
+            if let Ok(text) = std::fs::read_to_string(f) {
+                lines.extend(text.lines().map(str::to_string));
+            }
+        }
+        let tail: Vec<String> = lines
+            .iter()
+            .rev()
+            .take(200)
+            .rev()
+            .map(|l| scrub(l))
+            .collect();
+        out.push_str(&tail.join("\n"));
+        out.push('\n');
+        Ok(out)
+    })
+    .await
+}
+
 // ---------- auth
 
 #[tauri::command]
@@ -1326,12 +1431,15 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
             let dir = app
                 .path()
                 .app_data_dir()
                 .unwrap_or_else(|_| PathBuf::from(".kmdn-data"));
             std::fs::create_dir_all(&dir).ok();
+            init_logging(&dir);
+            tracing::info!(version = env!("CARGO_PKG_VERSION"), "kmdn started");
             let drafts = DraftStore::open(&dir.join("local.sqlite"))
                 .or_else(|_| DraftStore::in_memory())
                 .expect("draft store");
@@ -1384,6 +1492,7 @@ pub fn run() {
             draft_get,
             draft_clear,
             draft_list,
+            diagnostics,
             auth_status,
             auth_start_device_flow,
             auth_poll_device_flow,
