@@ -1,10 +1,11 @@
 import { useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FileText, GitPullRequest, HardDrive, Layers, PanelLeft, RefreshCw, Search } from "lucide-react";
+import { FileText, GitPullRequest, HardDrive, Layers, Palette, PanelLeft, RefreshCw, Search } from "lucide-react";
 import { api } from "@/lib/api";
 import { useUi } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { notify } from "@/lib/notify";
+import { useAppearance } from "@/lib/appearance";
 
 function Section({ title, icon: Icon, count, children }: { title: string; icon: typeof Layers; count?: number; children: React.ReactNode }) {
   return (
@@ -59,6 +60,7 @@ function useSyncLoop(root: string) {
 
 export function Sidebar() {
   const { kb, view, go, sidebarCollapsed, toggleSidebar, conflicts } = useUi();
+  const openAppearance = useAppearance((s) => s.setOpen);
   const root = kb!.root;
   const qc = useQueryClient();
   const threads = useQuery({ queryKey: ["threads", root], queryFn: () => api.listThreads(root) });
@@ -94,6 +96,7 @@ export function Sidebar() {
         <button title="Home" onClick={() => go({ kind: "home" })} className="p-1.5 rounded-md hover:bg-bg-elevated"><Layers size={16} /></button>
         <button title="Reviews" onClick={() => { toggleSidebar(); }} className="p-1.5 rounded-md hover:bg-bg-elevated"><GitPullRequest size={16} /></button>
         <button title="Documents" onClick={() => { toggleSidebar(); }} className="p-1.5 rounded-md hover:bg-bg-elevated"><FileText size={16} /></button>
+        <button title="Appearance" onClick={() => openAppearance(true)} className="mt-auto p-1.5 rounded-md hover:bg-bg-elevated text-fg-muted"><Palette size={16} /></button>
       </aside>
     );
   }
@@ -107,6 +110,7 @@ export function Sidebar() {
         <button title={sync.isPending ? "Syncing…" : "Sync now"} onClick={() => sync.mutate()} className="p-1 rounded-md hover:bg-bg-elevated text-fg-muted">
           <RefreshCw size={14} className={cn(sync.isPending && "animate-spin")} />
         </button>
+        <button title="Appearance" onClick={() => openAppearance(true)} className="p-1 rounded-md hover:bg-bg-elevated text-fg-muted"><Palette size={14} /></button>
         <button title="Collapse sidebar" onClick={toggleSidebar} className="p-1 rounded-md hover:bg-bg-elevated text-fg-muted"><PanelLeft size={14} /></button>
       </div>
       <div className="px-3 py-2">

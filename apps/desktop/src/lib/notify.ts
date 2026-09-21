@@ -5,12 +5,12 @@ import { isPermissionGranted, requestPermission, sendNotification } from "@tauri
 export type NotifyEvent = "agent_approval" | "agent_done" | "review_requested";
 
 const KEY = "kmdn.notify";
-function prefs(): Record<NotifyEvent, boolean> {
+export function getNotifyPrefs(): Record<NotifyEvent, boolean> {
   try { return { agent_approval: true, agent_done: true, review_requested: true, ...JSON.parse(localStorage.getItem(KEY) ?? "{}") }; }
   catch { return { agent_approval: true, agent_done: true, review_requested: true }; }
 }
 export function setNotifyPref(ev: NotifyEvent, on: boolean) {
-  try { localStorage.setItem(KEY, JSON.stringify({ ...prefs(), [ev]: on })); } catch { /* storage may be unavailable */ }
+  try { localStorage.setItem(KEY, JSON.stringify({ ...getNotifyPrefs(), [ev]: on })); } catch { /* storage may be unavailable */ }
 }
 
 let granted: boolean | null = null;
@@ -24,7 +24,7 @@ async function ensure(): Promise<boolean> {
 
 /** Fires only when the window is unfocused for agent events; review requests always fire. */
 export async function notify(ev: NotifyEvent, title: string, body: string) {
-  if (!prefs()[ev]) return;
+  if (!getNotifyPrefs()[ev]) return;
   if (ev !== "review_requested" && document.hasFocus()) return;
   if (!(await ensure())) return;
   try { sendNotification({ title, body }); } catch { /* best effort */ }
