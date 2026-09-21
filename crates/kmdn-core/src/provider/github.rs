@@ -16,6 +16,8 @@ pub struct GitHub {
     client: Client,
     base_url: String,
     token: String,
+    /// ETag cache for GET requests: url -> (etag, body). A 304 costs no rate-limit budget (D31).
+    etags: std::sync::Mutex<std::collections::HashMap<String, (String, String)>>,
 }
 
 impl GitHub {
@@ -28,7 +30,60 @@ impl GitHub {
             client: Client::new(),
             base_url: base_url.trim_end_matches('/').to_string(),
             token: token.to_string(),
+            etags: Default::default(),
         }
+    }
+
+    /// GET with a conditional request when this URL was fetched before. Returns the body text.
+    fn get_text(&self, url: &str) -> Result<String> {
+        let cached = self.etags.lock().ok().and_then(|m| m.get(url).cloned());
+        let mut rb = self.req(self.client.get(url));
+        if let Some((etag, _)) = &cached {
+            rb = rb.header(reqwest::header::IF_NONE_MATCH, etag.clone());
+        }
+        let resp = rb.send()?;
+        if resp.status() == reqwest::StatusCode::NOT_MODIFIED {
+            if let Some((_, body)) = cached {
+                return Ok(body);
+            }
+        }
+        let resp = Self::check(resp)?;
+        let etag = resp
+            .headers()
+            .get(reqwest::header::ETAG)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string);
+        let body = resp.text()?;
+        if let (Some(etag), Ok(mut m)) = (etag, self.etags.lock()) {
+            if m.len() > 512 {
+                m.clear();
+            }
+            m.insert(url.to_string(), (etag, body.clone()));
+        }
+        Ok(body)
+    }
+
+    /// One GraphQL request. Errors in the response body surface as `Decode`.
+    fn graphql(&self, query: &str, variables: Value) -> Result<Value> {
+        let url = format!("{}/graphql", self.base_url);
+        let v: Value = self.send_json(
+            self.client.post(url),
+            &json!({ "query": query, "variables": variables }),
+        )?;
+        if let Some(errs) = v
+            .get("errors")
+            .and_then(Value::as_array)
+            .filter(|e| !e.is_empty())
+        {
+            return Err(ProviderError::Decode(format!(
+                "graphql: {}",
+                errs[0]
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("error")
+            )));
+        }
+        Ok(v.get("data").cloned().unwrap_or(Value::Null))
     }
 
     fn req(&self, rb: RequestBuilder) -> RequestBuilder {
@@ -57,9 +112,8 @@ impl GitHub {
     }
 
     fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
-        let resp = Self::check(self.req(self.client.get(self.url(path))).send()?)?;
-        resp.json::<T>()
-            .map_err(|e| ProviderError::Decode(e.to_string()))
+        let body = self.get_text(&self.url(path))?;
+        serde_json::from_str::<T>(&body).map_err(|e| ProviderError::Decode(e.to_string()))
     }
 
     fn send_json<T: DeserializeOwned>(&self, rb: RequestBuilder, body: &Value) -> Result<T> {
@@ -171,6 +225,68 @@ fn parse_issue(v: &Value) -> Issue {
     }
 }
 
+impl GitHub {
+    fn list_open_pulls_graphql(&self, repo: &RepoRef) -> Result<Vec<PullRequest>> {
+        const QUERY: &str = r#"query($owner: String!, $name: String!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequests(states: OPEN, first: 100, after: $after, orderBy: {field: UPDATED_AT, direction: DESC}) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        number title body isDraft url updatedAt headRefName baseRefName
+        author { login }
+        files(first: 100) { nodes { path } }
+      }
+    }
+  }
+}"#;
+        let mut out = Vec::new();
+        let mut after: Option<String> = None;
+        for _ in 0..20 {
+            let data = self.graphql(
+                QUERY,
+                json!({ "owner": repo.owner, "name": repo.name, "after": after }),
+            )?;
+            let prs = data
+                .pointer("/repository/pullRequests")
+                .ok_or_else(|| ProviderError::Decode("graphql: no pullRequests".into()))?;
+            for n in prs
+                .get("nodes")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default()
+            {
+                out.push(PullRequest {
+                    number: n.get("number").and_then(Value::as_u64).unwrap_or(0),
+                    title: s(&n, "title"),
+                    body: s(&n, "body"),
+                    author: n.get("author").map(|a| s(a, "login")).unwrap_or_default(),
+                    head_branch: s(&n, "headRefName"),
+                    base_branch: s(&n, "baseRefName"),
+                    state: PullState::Open,
+                    draft: n.get("isDraft").and_then(Value::as_bool).unwrap_or(false),
+                    url: s(&n, "url"),
+                    updated_at: s(&n, "updatedAt"),
+                    files: n
+                        .pointer("/files/nodes")
+                        .and_then(Value::as_array)
+                        .map(|a| a.iter().map(|f| s(f, "path")).collect())
+                        .unwrap_or_default(),
+                });
+            }
+            let page = prs.get("pageInfo").cloned().unwrap_or(Value::Null);
+            if page.get("hasNextPage").and_then(Value::as_bool) == Some(true) {
+                after = page
+                    .get("endCursor")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+            } else {
+                break;
+            }
+        }
+        Ok(out)
+    }
+}
+
 impl Provider for GitHub {
     fn current_user(&self) -> Result<User> {
         let v: Value = self.get("/user")?;
@@ -213,6 +329,14 @@ impl Provider for GitHub {
     }
 
     fn list_open_pulls(&self, repo: &RepoRef) -> Result<Vec<PullRequest>> {
+        // One GraphQL request for every open PR with its files (D31) instead of 1 + N REST calls.
+        // Falls back to REST when GraphQL is unavailable (older GHES, restricted tokens).
+        match self.list_open_pulls_graphql(repo) {
+            Ok(prs) => return Ok(prs),
+            Err(e) => {
+                tracing::debug!("graphql pulls failed, using REST: {e}");
+            }
+        }
         let items: Vec<Value> = self.all_pages(&format!(
             "/repos/{}/{}/pulls?state=open",
             repo.owner, repo.name
@@ -538,6 +662,11 @@ mod tests {
             .with_body(r#"[{"filename":"package.json"}]"#)
             .create();
 
+        let _no_graphql = server
+            .mock("POST", "/graphql")
+            .with_status(404)
+            .with_body("{}")
+            .create();
         let gh = GitHub::with_base_url(&server.url(), "t0k");
         let prs = gh.list_open_pulls(&repo()).unwrap();
         assert_eq!(prs.len(), 2);
@@ -688,5 +817,52 @@ mod tests {
             .find_issue(&repo(), "kmdn", "other.md")
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn lists_open_pulls_with_one_graphql_request() {
+        let mut server = Server::new();
+        let gql = server
+            .mock("POST", "/graphql")
+            .match_body(Matcher::Regex("pullRequests".into()))
+            .with_body(r#"{"data":{"repository":{"pullRequests":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[
+                {"number":7,"title":"Update deploy","body":"","isDraft":false,"url":"u7","updatedAt":"2026-09-19T00:00:00Z","headRefName":"kmdn/alice/deploy","baseRefName":"main","author":{"login":"alice"},"files":{"nodes":[{"path":"ops/deploy.md"}]}},
+                {"number":8,"title":"Bump deps","body":"","isDraft":false,"url":"u8","updatedAt":"2026-09-19T00:00:00Z","headRefName":"deps","baseRefName":"main","author":{"login":"bot"},"files":{"nodes":[{"path":"package.json"}]}}
+            ]}}}}"#)
+            .expect(1)
+            .create();
+        let rest = server
+            .mock("GET", Matcher::Regex(r"^/repos/.*".into()))
+            .expect(0)
+            .create();
+        let gh = GitHub::with_base_url(&server.url(), "t0k");
+        let prs = gh.list_open_pulls(&repo()).unwrap();
+        assert_eq!(prs.iter().map(|p| p.number).collect::<Vec<_>>(), vec![7, 8]);
+        assert_eq!(prs[0].files, vec!["ops/deploy.md"]);
+        gql.assert();
+        rest.assert();
+    }
+
+    #[test]
+    fn conditional_requests_reuse_the_cached_body_on_304() {
+        let mut server = Server::new();
+        let first = server
+            .mock("GET", "/user")
+            .match_header("if-none-match", Matcher::Missing)
+            .with_header("etag", "\"abc\"")
+            .with_body(r#"{"login":"alice"}"#)
+            .expect(1)
+            .create();
+        let second = server
+            .mock("GET", "/user")
+            .match_header("if-none-match", "\"abc\"")
+            .with_status(304)
+            .expect(1)
+            .create();
+        let gh = GitHub::with_base_url(&server.url(), "t0k");
+        assert_eq!(gh.current_user().unwrap().login, "alice");
+        assert_eq!(gh.current_user().unwrap().login, "alice");
+        first.assert();
+        second.assert();
     }
 }
