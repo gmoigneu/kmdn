@@ -21,6 +21,9 @@ pub struct StoredToken {
     pub token: String,
     /// "device_flow" or "pat"
     pub kind: String,
+    /// Display name from the provider profile, used as the commit author name (05-git identity).
+    #[serde(default)]
+    pub name: Option<String>,
 }
 
 pub trait SecretStore: Send + Sync {
@@ -113,6 +116,7 @@ mod tests {
                 login: "alice".into(),
                 token: "gho_x".into(),
                 kind: "device_flow".into(),
+                name: None,
             })
             .unwrap();
         store
@@ -121,6 +125,7 @@ mod tests {
                 login: "alice".into(),
                 token: "glpat".into(),
                 kind: "pat".into(),
+                name: None,
             })
             .unwrap();
         assert_eq!(store.get("github.com").unwrap().unwrap().token, "gho_x");
