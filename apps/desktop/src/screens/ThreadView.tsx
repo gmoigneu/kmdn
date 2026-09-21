@@ -36,6 +36,12 @@ export function ThreadView({ slug, initialPath, initialMode, initialPrompt, init
   const [agentLog, setAgentLog] = useState("");
   const [postLog, setPostLog] = useState(true);
   const preview = useQuery({ queryKey: ["submit-preview", root, slug], queryFn: () => api.submitPreview(root, slug), enabled: submitOpen });
+  const detected = useQuery({ queryKey: ["agents"], queryFn: api.agentDetect, staleTime: 60_000, enabled: submitOpen });
+  const suggestAgent = detected.data?.find((d) => d.available)?.kind;
+  const suggest = useMutation({
+    mutationFn: () => api.submitSuggest(root, slug, suggestAgent!),
+    onSuccess: (s) => { setTitle(s.title); if (s.summary) setSummary(s.summary); },
+  });
   useEffect(() => {
     if (preview.data) { setAgentLog(preview.data.agent_log ?? ""); setPostLog(preview.data.post_agent_log && !!preview.data.agent_log); }
   }, [preview.data]);
@@ -143,6 +149,12 @@ export function ThreadView({ slug, initialPath, initialMode, initialPrompt, init
           <div className="flex items-center gap-2">
             <button onClick={() => submit.mutate()} disabled={submit.isPending} className="h-7 px-3 rounded-md bg-accent text-accent-fg text-xs disabled:opacity-40">{submit.isPending ? "Submitting…" : pr ? "Update review" : "Open review"}</button>
             <button onClick={() => setSubmitOpen(false)} className="h-7 px-3 rounded-md border border-border text-xs">Cancel</button>
+            {suggestAgent && (
+              <button onClick={() => suggest.mutate()} disabled={suggest.isPending} className="h-7 px-3 rounded-md border border-border text-xs disabled:opacity-40" title="Read-only: the agent sees the diff and proposes a title and summary">
+                {suggest.isPending ? "Asking…" : `Suggest with ${suggestAgent === "claude" ? "Claude" : suggestAgent === "codex" ? "Codex" : "pi"}`}
+              </button>
+            )}
+            {suggest.error && <span className="text-xs text-danger">{String(suggest.error)}</span>}
             <span className="text-xs text-fg-muted">Runs checks, updates the index, pushes, and opens a pull request.</span>
           </div>
           {outcome?.error && (

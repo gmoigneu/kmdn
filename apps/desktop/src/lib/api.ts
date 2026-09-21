@@ -157,6 +157,7 @@ export const api = {
   resolveThreadConflicts: (root: string, slug: string, resolutions: Record<string, string>) =>
     invoke<RebaseOutcome>("resolve_thread_conflicts", { root, slug, resolutions }),
   submitPreview: (root: string, slug: string) => invoke<SubmitPreview>("submit_preview", { root, slug }),
+  submitSuggest: (root: string, slug: string, kind: AgentKind) => invoke<{ title: string; summary: string }>("submit_suggest", { root, slug, kind }),
   submitThread: (root: string, slug: string, title: string, summary: string | null, agentLog: string | null) =>
     invoke<SubmitOutcome>("submit_thread", { root, slug, title, summary, agentLog }),
   listReviews: (root: string) => invoke<PullRequest[]>("list_reviews", { root }),

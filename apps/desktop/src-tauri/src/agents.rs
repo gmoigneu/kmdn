@@ -560,3 +560,135 @@ impl Session {
         }
     }
 }
+
+/// One-shot, read-only request to an agent CLI for a PR title and summary (D26). Runs the
+/// user's own login, never writes, and has a hard timeout. The diff is truncated so the
+/// prompt stays small.
+pub async fn suggest_draft(
+    kind: AgentKind,
+    worktree: &Path,
+    diff: &str,
+) -> Result<(String, String), String> {
+    let bin = which(kind.binary()).ok_or_else(|| format!("{} is not installed", kind.binary()))?;
+    let excerpt: String = diff.chars().take(12_000).collect();
+    let prompt = format!(
+        "You are helping open a pull request on a markdown knowledge base. Below is what changed.\n\
+Reply with exactly two lines and nothing else:\nTITLE: <imperative, under 70 characters, no trailing period>\n\
+SUMMARY: <one to three plain sentences for a reviewer>\n\n{excerpt}"
+    );
+    let mut cmd = Command::new(&bin);
+    cmd.current_dir(worktree)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    cmd.env_remove("CLAUDECODE");
+    let tmp = std::env::temp_dir().join(format!("kmdn-suggest-{}.txt", uuid::Uuid::new_v4()));
+    match kind {
+        AgentKind::Claude => {
+            cmd.args([
+                "-p",
+                "--output-format",
+                "json",
+                "--permission-mode",
+                "plan",
+                "--setting-sources",
+                "user",
+                "--disallowedTools",
+                "Bash",
+                "Edit",
+                "Write",
+                "MultiEdit",
+                "NotebookEdit",
+            ]);
+        }
+        AgentKind::Codex => {
+            cmd.args([
+                "exec",
+                "--skip-git-repo-check",
+                "--sandbox",
+                "read-only",
+                "-o",
+            ])
+            .arg(&tmp)
+            .arg(&prompt);
+        }
+        AgentKind::Pi => {
+            cmd.args(["-p", "--no-session", "--no-tools", &prompt]);
+        }
+    }
+    let mut child = cmd.spawn().map_err(|e| e.to_string())?;
+    if kind == AgentKind::Claude {
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin
+                .write_all(prompt.as_bytes())
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+    } else {
+        drop(child.stdin.take());
+    }
+    let out = tokio::time::timeout(
+        std::time::Duration::from_secs(120),
+        child.wait_with_output(),
+    )
+    .await
+    .map_err(|_| "the agent took more than two minutes".to_string())?
+    .map_err(|e| e.to_string())?;
+    let text = match kind {
+        AgentKind::Claude => {
+            let v: serde_json::Value =
+                serde_json::from_slice(&out.stdout).map_err(|e| e.to_string())?;
+            v.get("result")
+                .and_then(|r| r.as_str())
+                .unwrap_or("")
+                .to_string()
+        }
+        AgentKind::Codex => std::fs::read_to_string(&tmp).unwrap_or_default(),
+        AgentKind::Pi => String::from_utf8_lossy(&out.stdout).to_string(),
+    };
+    let _ = std::fs::remove_file(&tmp);
+    parse_suggestion(&text)
+        .ok_or_else(|| format!("{} did not answer in the expected format", kind.label()))
+}
+
+/// Pulls TITLE and SUMMARY out of the reply; tolerates extra prose around them.
+pub fn parse_suggestion(text: &str) -> Option<(String, String)> {
+    let mut title = None;
+    let mut summary: Vec<String> = Vec::new();
+    let mut in_summary = false;
+    for line in text.lines() {
+        let l = line.trim().trim_start_matches(['*', '-', '#']).trim();
+        if let Some(t) = l.strip_prefix("TITLE:") {
+            title = Some(
+                t.trim()
+                    .trim_matches(['"', '*'])
+                    .trim_end_matches('.')
+                    .chars()
+                    .take(70)
+                    .collect::<String>(),
+            );
+            in_summary = false;
+        } else if let Some(sm) = l.strip_prefix("SUMMARY:") {
+            summary.push(sm.trim().to_string());
+            in_summary = true;
+        } else if in_summary && !l.is_empty() {
+            summary.push(l.to_string());
+        }
+    }
+    let title = title.filter(|t| !t.is_empty())?;
+    Some((title, summary.join(" ").trim().to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_suggestion;
+
+    #[test]
+    fn parses_title_and_summary_with_noise() {
+        let (t, s) = parse_suggestion("Sure.\nTITLE: Update the deploy runbook.\nSUMMARY: Adds a rollback step.\nAlso notes the timeout.\n").unwrap();
+        assert_eq!(t, "Update the deploy runbook");
+        assert_eq!(s, "Adds a rollback step. Also notes the timeout.");
+        assert!(parse_suggestion("no markers here").is_none());
+    }
+}
