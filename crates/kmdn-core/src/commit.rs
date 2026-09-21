@@ -9,7 +9,16 @@ use serde::{Deserialize, Serialize};
 
 use crate::repo::RepoError;
 
-pub const DEFAULT_ALLOWED: &[&str] = &["**/*.md", "*.md", "**/assets/**", "assets/**", ".kmdn/**"];
+/// Paths kmdn itself commits: documents, assets, config, and the two CI check files it writes.
+pub const DEFAULT_ALLOWED: &[&str] = &[
+    "**/*.md",
+    "*.md",
+    "**/assets/**",
+    "assets/**",
+    ".kmdn/**",
+    ".github/workflows/kmdn-check.yml",
+    ".gitlab-ci.yml",
+];
 
 pub fn allowed_set(globs: &[&str]) -> Result<GlobSet, globset::Error> {
     let mut b = GlobSetBuilder::new();

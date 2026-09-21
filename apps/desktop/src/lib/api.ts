@@ -180,6 +180,7 @@ export const api = {
   defaultCloneDir: (name: string) => invoke<string>("default_clone_dir", { name }),
   agentDetect: () => invoke<DetectedAgent[]>("agent_detect"),
   diagnostics: () => invoke<string>("diagnostics"),
+  addCiCheck: (root: string) => invoke<ThreadWorktree>("add_ci_check", { root }),
   agentStart: (root: string, slug: string, kind: AgentKind, mode: AgentMode, resume: string | null = null) =>
     invoke<SessionInfo>("agent_start", { root, slug, kind, mode, resume }),
   agentSend: (slug: string, text: string) => invoke<void>("agent_send", { slug, text }),
