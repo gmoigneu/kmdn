@@ -36,7 +36,23 @@ pub trait SecretStore: Send + Sync {
     fn hosts(&self) -> Result<Vec<String>, SecretError>;
 }
 
-/// JSON file, mode 0600 on unix. Interim backend.
+/// Shared handles behave like the store they point to, so `&Arc<dyn SecretStore>` coerces.
+impl<T: SecretStore + ?Sized> SecretStore for std::sync::Arc<T> {
+    fn get(&self, host: &str) -> Result<Option<StoredToken>, SecretError> {
+        (**self).get(host)
+    }
+    fn put(&self, token: &StoredToken) -> Result<(), SecretError> {
+        (**self).put(token)
+    }
+    fn delete(&self, host: &str) -> Result<(), SecretError> {
+        (**self).delete(host)
+    }
+    fn hosts(&self) -> Result<Vec<String>, SecretError> {
+        (**self).hosts()
+    }
+}
+
+/// JSON file, mode 0600 on unix. Fallback backend.
 pub struct FileStore {
     path: PathBuf,
 }
