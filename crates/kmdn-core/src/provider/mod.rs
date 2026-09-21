@@ -3,6 +3,7 @@
 
 pub mod github;
 pub mod gitlab;
+pub mod http;
 pub mod mock;
 
 use serde::{Deserialize, Serialize};
@@ -233,4 +234,14 @@ pub enum DevicePoll {
     Token(String),
     Denied,
     Expired,
+}
+
+/// The client for a remote's provider kind (D4). Unknown hosts with a token are treated as
+/// self-hosted GitLab.
+pub fn client_for(kind: &crate::repo::ProviderKind, token: &str) -> Box<dyn Provider> {
+    match kind {
+        crate::repo::ProviderKind::GitHub => Box::new(github::GitHub::new(token)),
+        crate::repo::ProviderKind::GitLab { host }
+        | crate::repo::ProviderKind::Unknown { host } => Box::new(gitlab::GitLab::new(host, token)),
+    }
 }

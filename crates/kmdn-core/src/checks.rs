@@ -39,11 +39,11 @@ pub struct Finding {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct Options_ {
+pub struct CheckOptions {
     pub asset_cap: u64,
 }
 
-impl Options_ {
+impl CheckOptions {
     pub fn default_cap() -> Self {
         Self {
             asset_cap: DEFAULT_ASSET_CAP,
@@ -93,13 +93,13 @@ fn links_in(body: &str) -> Vec<String> {
     out
 }
 
-pub fn run(root: &Path, opts: &Options_) -> Vec<Finding> {
+pub fn run(root: &Path, opts: &CheckOptions) -> Vec<Finding> {
     run_with(root, opts, &index::scan_full(root))
 }
 
 /// Checks over an existing scan, so callers that already walked the tree (submit) do not
 /// read every document again (review P5).
-pub fn run_with(root: &Path, opts: &Options_, scan: &index::Scan) -> Vec<Finding> {
+pub fn run_with(root: &Path, opts: &CheckOptions, scan: &index::Scan) -> Vec<Finding> {
     let mut findings = Vec::new();
 
     for (doc, body) in scan.docs.iter().zip(scan.bodies.iter()) {
@@ -196,7 +196,7 @@ mod tests {
         std::fs::write(r.join("ops/assets/deploy/a.png"), vec![0u8; 10]).unwrap();
         std::fs::write(r.join("ops/assets/deploy/big.pdf"), vec![0u8; 20]).unwrap();
         std::fs::create_dir_all(r.join(".claude")).unwrap();
-        let f = run(r, &Options_ { asset_cap: 15 });
+        let f = run(r, &CheckOptions { asset_cap: 15 });
         let kinds: Vec<Kind> = f.iter().map(|x| x.kind).collect();
         assert!(kinds.contains(&Kind::AgentConfig));
         assert!(kinds.contains(&Kind::BrokenLink), "{f:?}");
@@ -211,7 +211,7 @@ mod tests {
         std::fs::write(r.join("ops/missing.md"), "# m\n").unwrap();
         std::fs::write(r.join("ops/rollback.md"), "# ok\n").unwrap();
         index::write_agents_md(r).unwrap();
-        let f = run(r, &Options_::default_cap());
+        let f = run(r, &CheckOptions::default_cap());
         assert_eq!(
             f.iter().filter(|x| x.level == Level::Error).count(),
             0,
@@ -228,7 +228,7 @@ mod tests {
         )
         .unwrap();
         index::write_agents_md(d.path()).unwrap();
-        let f = run(d.path(), &Options_::default_cap());
+        let f = run(d.path(), &CheckOptions::default_cap());
         assert!(f.is_empty(), "{f:?}");
     }
 }

@@ -138,7 +138,7 @@ pub fn submit(
     commit_allowed(wt, "Update index", author, &allowed)?;
 
     // 2. Checks on the worktree.
-    let findings = checks::run_with(wt, &checks::Options_::default_cap(), &scan);
+    let findings = checks::run_with(wt, &checks::CheckOptions::default_cap(), &scan);
     if checks::has_errors(&findings) {
         return Err(SubmitError::Checks(findings));
     }

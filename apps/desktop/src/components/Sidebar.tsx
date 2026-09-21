@@ -1,4 +1,6 @@
 import { useEffect, useRef } from "react";
+import { StatusPill } from "@/components/StatusPill";
+import { threadStatus } from "@/lib/status";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FileText, GitPullRequest, HardDrive, Layers, Palette, PanelLeft, RefreshCw, Search } from "lucide-react";
 import { api, type Document, type PullRequest } from "@/lib/api";
@@ -175,9 +177,7 @@ export function Sidebar() {
                 view.kind === "thread" && view.slug === t.slug && "bg-bg-elevated")}>
               <span className={cn("size-1.5 rounded-full", conflicts[t.slug] ? "bg-warn" : reviews.data?.some((p) => p.head_branch === t.branch) ? "bg-accent" : "bg-fg-muted")} title={conflicts[t.slug] ? "Conflicts with main" : undefined} />
               <span className="truncate">{reviews.data?.find((p) => p.head_branch === t.branch)?.title ?? t.slug}</span>
-              <span className={cn("ml-auto text-[10px] px-1.5 rounded-full border", reviews.data?.some((p) => p.head_branch === t.branch) ? "border-accent text-accent" : "border-border text-fg-muted")}>
-                {reviews.data?.some((p) => p.head_branch === t.branch) ? "in review" : "draft"}
-              </span>
+              <StatusPill className="ml-auto" status={threadStatus(t, reviews.data?.find((p) => p.head_branch === t.branch))} />
             </button>
           )) : !hasLocal && <div className="px-2 text-xs text-fg-muted">No threads yet.</div>}
           {(threads.data?.some((t) => t.merged_at)) && (
@@ -186,7 +186,7 @@ export function Sidebar() {
               {threads.data!.filter((t) => t.merged_at).map((t) => (
                 <button key={t.slug} onClick={() => go({ kind: "thread", slug: t.slug })} className="w-full text-left px-2 py-1 rounded-md truncate hover:bg-bg-elevated flex items-center gap-2 opacity-70">
                   <span className="size-1.5 rounded-full bg-ok" /><span className="truncate">{t.slug}</span>
-                  <span className="ml-auto text-[10px] px-1.5 rounded-full border border-ok text-ok">done</span>
+                  <StatusPill className="ml-auto" status={threadStatus(t)} />
                 </button>
               ))}
             </details>

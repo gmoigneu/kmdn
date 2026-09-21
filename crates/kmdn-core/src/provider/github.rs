@@ -1,23 +1,26 @@
 //! GitHub REST implementation. `base_url` defaults to api.github.com and is overridable for tests.
 
-use reqwest::blocking::{Client, RequestBuilder, Response};
-use reqwest::header::{ACCEPT, AUTHORIZATION, USER_AGENT};
-use serde::de::DeserializeOwned;
+use std::ops::Deref;
+
+use reqwest::header::{HeaderName, AUTHORIZATION};
 use serde_json::{json, Value};
 
+use super::http::{os, s, urlencode, JsonClient};
 use super::*;
 
 pub const API_URL: &str = "https://api.github.com";
 pub const DEVICE_CODE_URL: &str = "https://github.com/login/device/code";
 pub const DEVICE_TOKEN_URL: &str = "https://github.com/login/oauth/access_token";
-const UA: &str = "kmdn";
 
 pub struct GitHub {
-    client: Client,
-    base_url: String,
-    token: String,
-    /// ETag cache for GET requests: url -> (etag, body). A 304 costs no rate-limit budget (D31).
-    etags: std::sync::Mutex<std::collections::HashMap<String, (String, String)>>,
+    http: JsonClient,
+}
+
+impl Deref for GitHub {
+    type Target = JsonClient;
+    fn deref(&self) -> &JsonClient {
+        &self.http
+    }
 }
 
 impl GitHub {
@@ -27,47 +30,27 @@ impl GitHub {
 
     pub fn with_base_url(base_url: &str, token: &str) -> Self {
         Self {
-            client: Client::new(),
-            base_url: base_url.trim_end_matches('/').to_string(),
-            token: token.to_string(),
-            etags: Default::default(),
+            http: JsonClient::new(
+                base_url,
+                vec![
+                    (AUTHORIZATION, format!("Bearer {token}")),
+                    (
+                        HeaderName::from_static("accept"),
+                        "application/vnd.github+json".into(),
+                    ),
+                    (
+                        HeaderName::from_static("x-github-api-version"),
+                        "2022-11-28".into(),
+                    ),
+                ],
+            ),
         }
-    }
-
-    /// GET with a conditional request when this URL was fetched before. Returns the body text.
-    fn get_text(&self, url: &str) -> Result<String> {
-        let cached = self.etags.lock().ok().and_then(|m| m.get(url).cloned());
-        let mut rb = self.req(self.client.get(url));
-        if let Some((etag, _)) = &cached {
-            rb = rb.header(reqwest::header::IF_NONE_MATCH, etag.clone());
-        }
-        let resp = rb.send()?;
-        if resp.status() == reqwest::StatusCode::NOT_MODIFIED {
-            if let Some((_, body)) = cached {
-                return Ok(body);
-            }
-        }
-        let resp = Self::check(resp)?;
-        let etag = resp
-            .headers()
-            .get(reqwest::header::ETAG)
-            .and_then(|v| v.to_str().ok())
-            .map(str::to_string);
-        let body = resp.text()?;
-        if let (Some(etag), Ok(mut m)) = (etag, self.etags.lock()) {
-            if m.len() > 512 {
-                m.clear();
-            }
-            m.insert(url.to_string(), (etag, body.clone()));
-        }
-        Ok(body)
     }
 
     /// One GraphQL request. Errors in the response body surface as `Decode`.
     fn graphql(&self, query: &str, variables: Value) -> Result<Value> {
-        let url = format!("{}/graphql", self.base_url);
-        let v: Value = self.send_json(
-            self.client.post(url),
+        let v: Value = self.post_absolute(
+            &self.url("/graphql"),
             &json!({ "query": query, "variables": variables }),
         )?;
         if let Some(errs) = v
@@ -85,83 +68,6 @@ impl GitHub {
         }
         Ok(v.get("data").cloned().unwrap_or(Value::Null))
     }
-
-    fn req(&self, rb: RequestBuilder) -> RequestBuilder {
-        rb.header(USER_AGENT, UA)
-            .header(ACCEPT, "application/vnd.github+json")
-            .header("X-GitHub-Api-Version", "2022-11-28")
-            .header(AUTHORIZATION, format!("Bearer {}", self.token))
-    }
-
-    fn url(&self, path: &str) -> String {
-        format!("{}{}", self.base_url, path)
-    }
-
-    fn check(resp: Response) -> Result<Response> {
-        let status = resp.status();
-        if status.is_success() {
-            return Ok(resp);
-        }
-        let url = resp.url().to_string();
-        let body = resp.text().unwrap_or_default();
-        Err(ProviderError::Status {
-            status: status.as_u16(),
-            url,
-            body: body.chars().take(500).collect(),
-        })
-    }
-
-    fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
-        let body = self.get_text(&self.url(path))?;
-        serde_json::from_str::<T>(&body).map_err(|e| ProviderError::Decode(e.to_string()))
-    }
-
-    fn send_json<T: DeserializeOwned>(&self, rb: RequestBuilder, body: &Value) -> Result<T> {
-        let resp = Self::check(self.req(rb).json(body).send()?)?;
-        resp.json::<T>()
-            .map_err(|e| ProviderError::Decode(e.to_string()))
-    }
-
-    fn post<T: DeserializeOwned>(&self, path: &str, body: &Value) -> Result<T> {
-        self.send_json(self.client.post(self.url(path)), body)
-    }
-
-    fn patch<T: DeserializeOwned>(&self, path: &str, body: &Value) -> Result<T> {
-        self.send_json(self.client.patch(self.url(path)), body)
-    }
-
-    fn put_no_body(&self, path: &str, body: &Value) -> Result<()> {
-        Self::check(
-            self.req(self.client.put(self.url(path)))
-                .json(body)
-                .send()?,
-        )?;
-        Ok(())
-    }
-
-    fn all_pages<T: DeserializeOwned>(&self, path: &str) -> Result<Vec<T>> {
-        let mut out = Vec::new();
-        for page in 1..=20 {
-            let sep = if path.contains('?') { '&' } else { '?' };
-            let items: Vec<T> = self.get(&format!("{path}{sep}per_page=100&page={page}"))?;
-            let n = items.len();
-            out.extend(items);
-            if n < 100 {
-                break;
-            }
-        }
-        Ok(out)
-    }
-}
-
-fn s(v: &Value, k: &str) -> String {
-    v.get(k)
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string()
-}
-fn os(v: &Value, k: &str) -> Option<String> {
-    v.get(k).and_then(Value::as_str).map(str::to_string)
 }
 
 fn parse_pull(v: &Value) -> PullRequest {
@@ -597,38 +503,21 @@ impl Provider for GitHub {
     }
 }
 
-fn urlencode(s: &str) -> String {
-    url::form_urlencoded::byte_serialize(s.as_bytes()).collect()
-}
-
 /// Device flow step 1. `client_id` is the public GitHub App client id (D30).
 pub fn start_device_flow(client_id: &str, scope: &str, url: &str) -> Result<DeviceCode> {
-    let resp = Client::new()
-        .post(url)
-        .header(USER_AGENT, UA)
-        .header(ACCEPT, "application/json")
-        .form(&[("client_id", client_id), ("scope", scope)])
-        .send()?;
-    let resp = GitHub::check(resp)?;
-    resp.json::<DeviceCode>()
-        .map_err(|e| ProviderError::Decode(e.to_string()))
+    JsonClient::post_form_anon(url, &[("client_id", client_id), ("scope", scope)])
 }
 
 /// Device flow step 2, call every `interval` seconds until Token, Denied, or Expired.
 pub fn poll_device_flow(client_id: &str, device_code: &str, url: &str) -> Result<DevicePoll> {
-    let resp = Client::new()
-        .post(url)
-        .header(USER_AGENT, UA)
-        .header(ACCEPT, "application/json")
-        .form(&[
+    let v: Value = JsonClient::post_form_anon(
+        url,
+        &[
             ("client_id", client_id),
             ("device_code", device_code),
             ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
-        ])
-        .send()?;
-    let v: Value = GitHub::check(resp)?
-        .json()
-        .map_err(|e| ProviderError::Decode(e.to_string()))?;
+        ],
+    )?;
     if let Some(t) = v.get("access_token").and_then(Value::as_str) {
         return Ok(DevicePoll::Token(t.to_string()));
     }

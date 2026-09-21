@@ -32,6 +32,27 @@ pub enum ProviderKind {
     },
 }
 
+impl ProviderKind {
+    /// Kind for a bare hostname: github.com is GitHub, anything else is GitLab (D4).
+    pub fn from_host(host: &str) -> Self {
+        let host = host.to_ascii_lowercase();
+        if host == "github.com" {
+            ProviderKind::GitHub
+        } else if host.contains("gitlab") {
+            ProviderKind::GitLab { host }
+        } else {
+            ProviderKind::Unknown { host }
+        }
+    }
+
+    pub fn host_name(&self) -> &str {
+        match self {
+            ProviderKind::GitHub => "github.com",
+            ProviderKind::GitLab { host } | ProviderKind::Unknown { host } => host,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RemoteInfo {
     pub provider: ProviderKind,

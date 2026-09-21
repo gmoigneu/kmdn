@@ -449,12 +449,17 @@ impl Runtime {
 
 impl Session {
     fn info(&self) -> SessionInfo {
+        // A held lock means a send or stop is in flight, so the process is still ours.
+        let running = match self.child.try_lock() {
+            Ok(mut child) => matches!(child.try_wait(), Ok(None)),
+            Err(_) => true,
+        };
         SessionInfo {
             slug: self.slug.clone(),
             kind: self.kind,
             mode: self.mode,
             session_id: self.session_id.lock().unwrap().clone(),
-            running: true,
+            running,
         }
     }
 

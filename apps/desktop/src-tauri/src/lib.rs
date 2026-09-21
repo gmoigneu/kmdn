@@ -14,8 +14,7 @@ use kmdn_core::diff::FileChange;
 use kmdn_core::drafts::{Draft as EditorDraft, DraftStore};
 use kmdn_core::index::{self, Document, KbConfig};
 use kmdn_core::local_changes::{self, LocalChanges};
-use kmdn_core::provider::github::{self, GitHub};
-use kmdn_core::provider::gitlab::GitLab;
+use kmdn_core::provider::github;
 use kmdn_core::provider::{
     self, Comment, DeviceCode, DevicePoll, MergeMethod, Mergeability, Provider, PullRequest,
     RepoRef, RepoSummary, ReviewEvent, Side, User,
@@ -98,10 +97,7 @@ async fn blocking<T: Send + 'static>(
 
 fn token_for(secrets: &dyn SecretStore, remote: &RemoteInfo) -> Option<(StoredToken, Token)> {
     let stored = secrets.get(&remote.host).ok().flatten()?;
-    let token = match remote.provider {
-        ProviderKind::GitHub => Token::github(&stored.token),
-        _ => Token::gitlab(&stored.token),
-    };
+    let token = Token::for_kind(&remote.provider, &stored.token);
     Some((stored, token))
 }
 
@@ -111,15 +107,8 @@ fn provider_for(
 ) -> Result<(Box<dyn Provider>, Token, RepoRef), String> {
     let (stored, token) =
         token_for(secrets, remote).ok_or_else(|| format!("not signed in to {}", remote.host))?;
-    let provider: Box<dyn Provider> = match &remote.provider {
-        ProviderKind::GitHub => Box::new(GitHub::new(&stored.token)),
-        // Unknown hosts with a stored token are treated as self-hosted GitLab (D4).
-        ProviderKind::GitLab { host } | ProviderKind::Unknown { host } => {
-            Box::new(GitLab::new(host, &stored.token))
-        }
-    };
     Ok((
-        provider,
+        kmdn_core::provider::client_for(&remote.provider, &stored.token),
         token,
         RepoRef {
             owner: remote.owner.clone(),
@@ -128,14 +117,43 @@ fn provider_for(
     ))
 }
 
+/// Everything a provider-backed command needs from a KB root: the open repo and an
+/// authenticated client for its origin.
+struct ProviderCtx {
+    repo: Repo,
+    provider: Box<dyn Provider>,
+    token: Token,
+    repo_ref: RepoRef,
+}
+
+fn provider_ctx(secrets: &dyn SecretStore, root: &str) -> Result<ProviderCtx, String> {
+    let repo = Repo::open(root).map_err(err)?;
+    let remote = repo.remote_info("origin").map_err(err)?;
+    let (provider, token, repo_ref) = provider_for(secrets, &remote)?;
+    Ok(ProviderCtx {
+        repo,
+        provider,
+        token,
+        repo_ref,
+    })
+}
+
+/// The commit email remembered at sign-in, else the provider's noreply address.
+fn stored_email(data_dir: &Path, host: &str, login: &str) -> String {
+    std::fs::read_to_string(data_dir.join(format!("{host}.email")))
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|_| noreply_email(login, host))
+}
+
+fn noreply_email(login: &str, host: &str) -> String {
+    format!("{login}@users.noreply.{host}")
+}
+
 /// Identity for commits: the provider profile when signed in, else git config.
 fn author_for(repo: &Repo, state: &AppState) -> Author {
     if let Ok(remote) = repo.remote_info("origin") {
         if let Some((stored, _)) = token_for(&state.secrets, &remote) {
-            let email =
-                std::fs::read_to_string(state.data_dir.join(format!("{}.email", remote.host)))
-                    .map(|s| s.trim().to_string())
-                    .unwrap_or_else(|_| format!("{}@users.noreply.github.com", stored.login));
+            let email = stored_email(&state.data_dir, &remote.host, &stored.login);
             return Author {
                 name: stored.name.clone().unwrap_or_else(|| stored.login.clone()),
                 email,
@@ -321,9 +339,7 @@ async fn create_kb(
         let summary: RepoSummary = provider
             .create_repo(&name, &description, true, org.as_deref())
             .map_err(err)?;
-        let email = std::fs::read_to_string(data_dir.join(format!("{host}.email")))
-            .map(|s| s.trim().to_string())
-            .unwrap_or_else(|_| format!("{}@users.noreply.{host}", stored.login));
+        let email = stored_email(&data_dir, &host, &stored.login);
         let author = Author {
             name: stored.login.clone(),
             email,
@@ -368,7 +384,7 @@ async fn run_checks(root: String) -> Result<Vec<kmdn_core::checks::Finding>, Str
     blocking(move || {
         Ok(kmdn_core::checks::run(
             Path::new(&root),
-            &kmdn_core::checks::Options_::default_cap(),
+            &kmdn_core::checks::CheckOptions::default_cap(),
         ))
     })
     .await
@@ -586,10 +602,13 @@ async fn submit_thread(
     // The author saw and possibly edited the log in the submit form; None means do not post (D58).
     let agent_log = agent_log.filter(|l| !l.trim().is_empty());
     blocking(move || {
-        let repo = Repo::open(&root).map_err(err)?;
+        let ProviderCtx {
+            repo,
+            provider,
+            token,
+            repo_ref,
+        } = provider_ctx(&st.secrets, &root)?;
         let wt = worktree_for(&repo, &slug)?;
-        let remote = repo.remote_info("origin").map_err(err)?;
-        let (provider, token, repo_ref) = provider_for(&st.secrets, &remote)?;
         let author = author_for(&repo, &st);
         let draft = Draft {
             title,
@@ -729,19 +748,13 @@ async fn adopt_branch(root: String, branch: String) -> Result<ThreadWorktree, St
             repo.git()
                 .set_head(&format!("refs/heads/{default}"))
                 .map_err(err)?;
-            repo.git()
-                .checkout_head(Some(git2_checkout_force().as_mut()))
-                .map_err(err)?;
+            let mut checkout = kmdn_core::git2::build::CheckoutBuilder::new();
+            checkout.force();
+            repo.git().checkout_head(Some(&mut checkout)).map_err(err)?;
         }
         local_changes::adopt_branch(&repo, &branch).map_err(err)
     })
     .await
-}
-
-fn git2_checkout_force() -> Box<kmdn_core::git2::build::CheckoutBuilder<'static>> {
-    let mut cb = kmdn_core::git2::build::CheckoutBuilder::new();
-    cb.force();
-    Box::new(cb)
 }
 
 /// Rebase one thread onto main, settling conflicts with the resolver's content per file (D21).
@@ -823,9 +836,12 @@ async fn doc_discussion(
 ) -> Result<Discussion, String> {
     let secrets = state.secrets.clone();
     blocking(move || {
-        let repo = Repo::open(&root).map_err(err)?;
-        let remote = repo.remote_info("origin").map_err(err)?;
-        let (provider, _, repo_ref) = provider_for(&secrets, &remote)?;
+        let ProviderCtx {
+            repo: _,
+            provider,
+            token: _,
+            repo_ref,
+        } = provider_ctx(&secrets, &root)?;
         let issue = provider.find_issue(&repo_ref, "kmdn", &path).map_err(err)?;
         let comments = match &issue {
             Some(i) => provider
@@ -847,9 +863,12 @@ async fn doc_discussion_comment(
 ) -> Result<Discussion, String> {
     let secrets = state.secrets.clone();
     blocking(move || {
-        let repo = Repo::open(&root).map_err(err)?;
-        let remote = repo.remote_info("origin").map_err(err)?;
-        let (provider, _, repo_ref) = provider_for(&secrets, &remote)?;
+        let ProviderCtx {
+            repo: _,
+            provider,
+            token: _,
+            repo_ref,
+        } = provider_ctx(&secrets, &root)?;
         let issue = match provider.find_issue(&repo_ref, "kmdn", &path).map_err(err)? {
             Some(i) => i,
             None => provider
@@ -872,9 +891,12 @@ async fn list_reviews(
 ) -> Result<Vec<PullRequest>, String> {
     let secrets = state.secrets.clone();
     blocking(move || {
-        let repo = Repo::open(&root).map_err(err)?;
-        let remote = repo.remote_info("origin").map_err(err)?;
-        let (provider, _, repo_ref) = provider_for(&secrets, &remote)?;
+        let ProviderCtx {
+            repo: _,
+            provider,
+            token: _,
+            repo_ref,
+        } = provider_ctx(&secrets, &root)?;
         let prs = provider.list_open_pulls(&repo_ref).map_err(err)?;
         Ok(prs
             .into_iter()
@@ -902,9 +924,12 @@ async fn review_detail(
 ) -> Result<ReviewDetail, String> {
     let secrets = state.secrets.clone();
     blocking(move || {
-        let repo = Repo::open(&root).map_err(err)?;
-        let remote = repo.remote_info("origin").map_err(err)?;
-        let (provider, token, repo_ref) = provider_for(&secrets, &remote)?;
+        let ProviderCtx {
+            repo,
+            provider,
+            token,
+            repo_ref,
+        } = provider_ctx(&secrets, &root)?;
         let pull = provider.get_pull(&repo_ref, number).map_err(err)?;
         let head = kmdn_core::diff::fetch_branch(repo.git(), &pull.head_branch, Some(&token))
             .map_err(err)?;
@@ -936,9 +961,12 @@ async fn review_comment(
 ) -> Result<Comment, String> {
     let secrets = state.secrets.clone();
     blocking(move || {
-        let repo = Repo::open(&root).map_err(err)?;
-        let remote = repo.remote_info("origin").map_err(err)?;
-        let (provider, _, repo_ref) = provider_for(&secrets, &remote)?;
+        let ProviderCtx {
+            repo: _,
+            provider,
+            token: _,
+            repo_ref,
+        } = provider_ctx(&secrets, &root)?;
         match (path, line) {
             (Some(p), Some(l)) => provider
                 .create_review_comment(&repo_ref, number, &body, &p, l, side.unwrap_or(Side::Right))
@@ -961,9 +989,12 @@ async fn review_submit(
 ) -> Result<(), String> {
     let secrets = state.secrets.clone();
     blocking(move || {
-        let repo = Repo::open(&root).map_err(err)?;
-        let remote = repo.remote_info("origin").map_err(err)?;
-        let (provider, _, repo_ref) = provider_for(&secrets, &remote)?;
+        let ProviderCtx {
+            repo: _,
+            provider,
+            token: _,
+            repo_ref,
+        } = provider_ctx(&secrets, &root)?;
         provider
             .submit_review(&repo_ref, number, event, &body)
             .map_err(err)
@@ -981,9 +1012,12 @@ async fn review_merge(
 ) -> Result<(), String> {
     let secrets = state.secrets.clone();
     blocking(move || {
-        let repo = Repo::open(&root).map_err(err)?;
-        let remote = repo.remote_info("origin").map_err(err)?;
-        let (provider, token, repo_ref) = provider_for(&secrets, &remote)?;
+        let ProviderCtx {
+            repo,
+            provider,
+            token,
+            repo_ref,
+        } = provider_ctx(&secrets, &root)?;
         let pull = provider.get_pull(&repo_ref, number).map_err(err)?;
         provider
             .merge_pull(&repo_ref, number, method.unwrap_or(MergeMethod::Squash))
@@ -1539,11 +1573,7 @@ async fn auth_save_pat(
 }
 
 fn provider_by_host(host: &str, token: &str) -> Box<dyn Provider> {
-    if host == "github.com" {
-        Box::new(GitHub::new(token))
-    } else {
-        Box::new(GitLab::new(host, token))
-    }
+    kmdn_core::provider::client_for(&ProviderKind::from_host(host), token)
 }
 
 /// Validates the token against the host, stores it, remembers the profile email.
@@ -1567,7 +1597,7 @@ fn store_token(
     let email = user
         .email
         .clone()
-        .unwrap_or_else(|| format!("{}@users.noreply.{host}", user.login));
+        .unwrap_or_else(|| noreply_email(&user.login, host));
     std::fs::write(data_dir.join(format!("{host}.email")), email).map_err(err)?;
     Ok(user.login)
 }

@@ -151,7 +151,9 @@ fn golden_path_gitlab() {
     assert!(clone.join(&doc).exists());
     let agents = std::fs::read_to_string(clone.join(index::AGENTS_FILE)).unwrap();
     assert!(agents.contains(&doc));
-    assert!(kmdn_core::checks::run(&clone, &kmdn_core::checks::Options_::default_cap()).is_empty());
+    assert!(
+        kmdn_core::checks::run(&clone, &kmdn_core::checks::CheckOptions::default_cap()).is_empty()
+    );
     repo.remove_thread_worktree(&slug, true).unwrap();
     assert!(!Path::new(&wt.path).exists());
 }
