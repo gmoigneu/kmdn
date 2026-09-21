@@ -123,6 +123,7 @@ export interface ConflictFile {
 export interface SyncReport {
   main: FastForward;
   threads: [string, { Ok: RebaseOutcome } | { Err: string }][];
+  pushed: string[];
 }
 
 export interface LocalChanges {
