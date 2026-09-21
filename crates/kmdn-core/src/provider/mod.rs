@@ -62,6 +62,9 @@ pub struct PullRequest {
     pub updated_at: String,
     /// Paths touched. Filled by `list_open_pulls` so the caller can keep markdown PRs only.
     pub files: Vec<String>,
+    /// Logins whose review was requested, so the UI can list "requested from me" first.
+    #[serde(default)]
+    pub reviewers: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

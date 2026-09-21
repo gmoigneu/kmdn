@@ -183,6 +183,11 @@ fn parse_pull(v: &Value) -> PullRequest {
         url: s(v, "html_url"),
         updated_at: s(v, "updated_at"),
         files: vec![],
+        reviewers: v
+            .get("requested_reviewers")
+            .and_then(Value::as_array)
+            .map(|a| a.iter().map(|u| s(u, "login")).collect())
+            .unwrap_or_default(),
     }
 }
 
@@ -235,6 +240,7 @@ impl GitHub {
         number title body isDraft url updatedAt headRefName baseRefName
         author { login }
         files(first: 100) { nodes { path } }
+        reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } } } }
       }
     }
   }
@@ -270,6 +276,19 @@ impl GitHub {
                         .pointer("/files/nodes")
                         .and_then(Value::as_array)
                         .map(|a| a.iter().map(|f| s(f, "path")).collect())
+                        .unwrap_or_default(),
+                    reviewers: n
+                        .pointer("/reviewRequests/nodes")
+                        .and_then(Value::as_array)
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|r| {
+                                    r.pointer("/requestedReviewer/login")
+                                        .and_then(Value::as_str)
+                                })
+                                .map(str::to_string)
+                                .collect()
+                        })
                         .unwrap_or_default(),
                 });
             }

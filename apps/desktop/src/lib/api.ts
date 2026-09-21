@@ -33,6 +33,7 @@ export interface KbInfo {
   dirty_paths: string[];
   config: KbConfig;
   user: Author;
+  login: string | null;
   authenticated: boolean;
 }
 
@@ -45,7 +46,7 @@ export interface RepoSummary { owner: string; name: string; full_name: string; p
 export type PullState = "open" | "closed" | "merged";
 export interface PullRequest {
   number: number; title: string; body: string; author: string; head_branch: string; base_branch: string;
-  state: PullState; draft: boolean; url: string; updated_at: string; files: string[];
+  state: PullState; draft: boolean; url: string; updated_at: string; files: string[]; reviewers: string[];
 }
 export interface Comment { id: number; author: string; body: string; created_at: string; url: string; path: string | null; line: number | null; side: "left" | "right" | null }
 export interface Issue { number: number; title: string; body: string; url: string; open: boolean }

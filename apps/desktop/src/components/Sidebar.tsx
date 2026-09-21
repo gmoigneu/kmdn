@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FileText, GitPullRequest, HardDrive, Layers, Palette, PanelLeft, RefreshCw, Search } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, type Document, type PullRequest } from "@/lib/api";
 import { useUi } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { notify } from "@/lib/notify";
@@ -62,6 +62,16 @@ function useSyncLoop(root: string) {
   return sync;
 }
 
+function DocRow({ doc, active, onOpen, label }: { doc: Document; active: boolean; onOpen: () => void; label?: string }) {
+  const rel = label ?? doc.path;
+  const dir = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/") + 1) : "";
+  return (
+    <button onClick={onOpen} className={cn("w-full text-left px-2 py-1 rounded-md truncate hover:bg-bg-elevated", active && "bg-bg-elevated")} title={doc.path}>
+      <span className="text-fg-muted">{dir}</span>{doc.title}
+    </button>
+  );
+}
+
 export function Sidebar() {
   const { kb, view, go, sidebarCollapsed, toggleSidebar, conflicts } = useUi();
   const openAppearance = useAppearance((s) => s.setOpen);
@@ -94,6 +104,22 @@ export function Sidebar() {
     onSuccess: (t) => { qc.invalidateQueries({ queryKey: ["threads", root] }); qc.invalidateQueries({ queryKey: ["local", root] }); go({ kind: "thread", slug: t.slug }); },
   });
   const hasLocal = local.data && (local.data.dirty_paths.length > 0 || local.data.foreign_branch || local.data.operation_in_progress);
+  // Reviews requested from me first (10-ui.md), then the rest by recency.
+  const forMe = (p: PullRequest) => !!kb!.login && p.reviewers.includes(kb!.login);
+  const sortedReviews = [...(reviews.data ?? [])].sort((a, b) => Number(forMe(b)) - Number(forMe(a)) || b.updated_at.localeCompare(a.updated_at));
+  // Documents: root files first, then one group per top-level folder, ordered by the order key then title (D19).
+  const byOrder = (a: Document, b: Document) => (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER) || a.title.localeCompare(b.title);
+  const tree = (() => {
+    const root: Document[] = [];
+    const folders = new Map<string, Document[]>();
+    for (const d of docs.data ?? []) {
+      const i = d.path.indexOf("/");
+      if (i < 0) root.push(d);
+      else { const f = d.path.slice(0, i); folders.set(f, [...(folders.get(f) ?? []), d]); }
+    }
+    root.sort(byOrder);
+    return { root, folders: [...folders.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([f, items]) => [f, items.sort(byOrder)] as const) };
+  })();
 
   if (sidebarCollapsed) {
     return (
@@ -169,25 +195,26 @@ export function Sidebar() {
         <Section title="Reviews" icon={GitPullRequest} count={reviews.data?.length}>
           {!kb!.authenticated && <div className="px-2 text-xs text-fg-muted">Sign in to see reviews.</div>}
           {reviews.error && <div className="px-2 text-xs text-danger">{String(reviews.error)}</div>}
-          {reviews.data?.map((p) => (
+          {sortedReviews.map((p) => (
             <button key={p.number} onClick={() => go({ kind: "review", number: p.number })}
               className={cn("w-full text-left px-2 py-1 rounded-md hover:bg-bg-elevated flex items-center gap-2",
                 view.kind === "review" && view.number === p.number && "bg-bg-elevated")} title={p.url}>
               <span className="text-fg-muted tabular-nums text-[11px]">#{p.number}</span>
               <span className="truncate flex-1">{p.title}</span>
-              <span className="text-[10px] text-fg-muted">{p.author}</span>
+              {forMe(p) ? <span className="text-[10px] px-1.5 rounded-full border border-accent text-accent">for you</span> : <span className="text-[10px] text-fg-muted">{p.author}</span>}
             </button>
           ))}
           {kb!.authenticated && reviews.data?.length === 0 && <div className="px-2 text-xs text-fg-muted">No open reviews.</div>}
         </Section>
         <Section title="Documents" icon={FileText} count={docs.data?.length}>
-          {docs.data?.map((d) => (
-            <button key={d.path} onClick={() => go({ kind: "document", path: d.path })}
-              className={cn("w-full text-left px-2 py-1 rounded-md truncate hover:bg-bg-elevated",
-                view.kind === "document" && view.path === d.path && "bg-bg-elevated")}
-              title={d.path}>
-              <span className="text-fg-muted">{d.path.includes("/") ? d.path.slice(0, d.path.lastIndexOf("/") + 1) : ""}</span>{d.title}
-            </button>
+          {tree.root.map((d) => <DocRow key={d.path} doc={d} active={view.kind === "document" && view.path === d.path} onOpen={() => go({ kind: "document", path: d.path })} />)}
+          {tree.folders.map(([folder, items]) => (
+            <details key={folder} open className="mt-0.5">
+              <summary className="px-2 py-1 text-xs text-fg-muted cursor-pointer select-none">{folder}/ <span className="tabular-nums">{items.length}</span></summary>
+              <div className="pl-2">
+                {items.map((d) => <DocRow key={d.path} doc={d} active={view.kind === "document" && view.path === d.path} onOpen={() => go({ kind: "document", path: d.path })} label={d.path.slice(folder.length + 1)} />)}
+              </div>
+            </details>
           ))}
         </Section>
       </div>
