@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowUp, Bot, Pencil } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, type AgentKind } from "@/lib/api";
 import { useUi } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
@@ -11,6 +11,9 @@ export function Home() {
   const qc = useQueryClient();
   const [text, setText] = useState("");
   const [mode, setMode] = useState<"suggest" | "edit">("edit");
+  const detected = useQuery({ queryKey: ["agents"], queryFn: api.agentDetect, staleTime: 60_000 });
+  const [agent, setAgent] = useState<AgentKind | "">("");
+  const chosenAgent = (agent || detected.data?.find((d) => d.available)?.kind || "") as AgentKind | "";
   const threads = useQuery({ queryKey: ["threads", root], queryFn: () => api.listThreads(root) });
   const reviews = useQuery({ queryKey: ["reviews", root], queryFn: () => api.listReviews(root), enabled: kb!.authenticated, retry: false });
   const prFor = (branch: string) => reviews.data?.find((p) => p.head_branch === branch);
@@ -23,7 +26,13 @@ export function Home() {
   const [showDone, setShowDone] = useState(false);
   const create = useMutation({
     mutationFn: (slug: string) => api.createThread(root, slug),
-    onSuccess: (t) => { qc.invalidateQueries({ queryKey: ["threads", root] }); setText(""); go({ kind: "thread", slug: t.slug, initialMode: mode }); },
+    onSuccess: (t) => {
+      qc.invalidateQueries({ queryKey: ["threads", root] });
+      const prompt = text.trim();
+      setText("");
+      // The composer text is the first message to the agent, not just a name (06-agents.md).
+      go({ kind: "thread", slug: t.slug, initialMode: mode, initialPrompt: chosenAgent ? prompt : undefined, initialAgent: chosenAgent || undefined });
+    },
   });
 
   return (
@@ -35,13 +44,19 @@ export function Home() {
             placeholder="Describe the change, or start a thread and edit by hand."
             className="w-full resize-none bg-transparent p-3 outline-none text-sm" />
           <div className="flex items-center gap-2 px-2 py-2 border-t border-border text-xs">
-            <span className="flex items-center gap-1 px-2 h-7 rounded-md border border-border text-fg-muted"><Bot size={12} /> No agent</span>
+            <label className="flex items-center gap-1 px-2 h-7 rounded-md border border-border text-fg-muted">
+              <Bot size={12} />
+              <select value={chosenAgent} onChange={(e) => setAgent(e.target.value as AgentKind | "")} className="bg-transparent outline-none text-fg">
+                {!detected.data?.some((d) => d.available) && <option value="">No agent installed</option>}
+                {detected.data?.filter((d) => d.available).map((d) => <option key={d.kind} value={d.kind}>{d.kind === "claude" ? "Claude" : d.kind === "codex" ? "Codex" : "pi"}</option>)}
+              </select>
+            </label>
             <div className="flex rounded-md border border-border overflow-hidden">
               {(["suggest", "edit"] as const).map((m) => (
                 <button key={m} onClick={() => setMode(m)} className={cn("px-2 h-7 capitalize", mode === m ? "bg-bg-muted" : "text-fg-muted")}>{m}</button>
               ))}
             </div>
-            <button disabled={!text.trim() || create.isPending} onClick={() => create.mutate(text.trim().slice(0, 48))}
+            <button disabled={!text.trim() || create.isPending} onClick={() => create.mutate(text.trim().split(/\s+/).slice(0, 6).join(" ").slice(0, 48))}
               className="ml-auto size-7 rounded-md bg-accent text-accent-fg grid place-items-center disabled:opacity-40" title="Start thread">
               <ArrowUp size={14} />
             </button>

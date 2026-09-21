@@ -1,7 +1,7 @@
 import { create } from "zustand";
-import type { AgentMode, ConflictFile, KbInfo } from "./api";
+import type { AgentKind, AgentMode, ConflictFile, KbInfo } from "./api";
 
-export type View = { kind: "home" } | { kind: "thread"; slug: string; openPath?: string; initialMode?: AgentMode } | { kind: "document"; path: string } | { kind: "review"; number: number };
+export type View = { kind: "home" } | { kind: "thread"; slug: string; openPath?: string; initialMode?: AgentMode; initialPrompt?: string; initialAgent?: AgentKind } | { kind: "document"; path: string } | { kind: "review"; number: number };
 
 interface UiState {
   kb: KbInfo | null;

@@ -20,10 +20,10 @@ function toolLabel(t: ToolKind) {
   return typeof t === "string" ? t : t.other;
 }
 
-export function AgentPanel({ root, slug, branch, initialMode, onChanged }: { root: string; slug: string; branch: string; initialMode?: AgentMode; onChanged: () => void }) {
+export function AgentPanel({ root, slug, branch, initialMode, initialPrompt, initialAgent, onChanged }: { root: string; slug: string; branch: string; initialMode?: AgentMode; initialPrompt?: string; initialAgent?: AgentKind; onChanged: () => void }) {
   const detected = useQuery({ queryKey: ["agents"], queryFn: api.agentDetect, staleTime: 60_000 });
   const session = useQuery({ queryKey: ["agent-session", slug], queryFn: () => api.agentSession(slug) });
-  const [kind, setKind] = useState<AgentKind>("claude");
+  const [kind, setKind] = useState<AgentKind>(initialAgent ?? "claude");
   const [mode, setMode] = useState<AgentMode>(initialMode ?? "edit");
   const [text, setText] = useState("");
   const [items, setItems] = useState<Item[]>([]);
@@ -46,6 +46,20 @@ export function AgentPanel({ root, slug, branch, initialMode, onChanged }: { roo
   }, [slug]);
 
   useEffect(() => { scroller.current?.scrollTo({ top: scroller.current.scrollHeight }); }, [items]);
+
+  // A prompt typed on Home starts the agent in this thread and sends it once (06-agents.md).
+  const autoSent = useRef(false);
+  useEffect(() => {
+    if (autoSent.current || !initialPrompt?.trim() || detected.data === undefined || session.data === undefined) return;
+    const usable = initialAgent && detected.data.find((d) => d.kind === initialAgent)?.available ? initialAgent : detected.data.find((d) => d.available)?.kind;
+    if (!usable) return;
+    autoSent.current = true;
+    setKind(usable);
+    setText(initialPrompt);
+    setTimeout(() => sendRef.current?.(), 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialPrompt, initialAgent, detected.data, session.data]);
+  const sendRef = useRef<(() => void) | null>(null);
 
   function apply(ev: AgentEvent) {
     setItems((prev) => {
@@ -106,6 +120,7 @@ export function AgentPanel({ root, slug, branch, initialMode, onChanged }: { roo
     },
     onError: (e) => { setBusy(false); setItems((p) => [...p, { kind: "note", text: String(e), error: true }]); },
   });
+  sendRef.current = () => { if (!busy) send.mutate(); };
   const answer = useMutation({
     mutationFn: ({ id, allow }: { id: string; allow: boolean }) => api.agentReplyPermission(slug, id, allow, allow ? null : "denied by user"),
     onSuccess: (_, { id, allow }) => setItems((p) => p.map((x) => (x.kind === "permission" && x.id === id ? { ...x, answered: allow } : x))),

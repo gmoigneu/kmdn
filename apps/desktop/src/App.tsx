@@ -18,7 +18,7 @@ export default function App() {
       <Sidebar />
       <main className="flex-1 min-w-0 flex flex-col">
         {view.kind === "home" && <Home />}
-        {view.kind === "thread" && <ThreadView key={view.slug} slug={view.slug} initialPath={view.openPath} initialMode={view.initialMode} />}
+        {view.kind === "thread" && <ThreadView key={view.slug} slug={view.slug} initialPath={view.openPath} initialMode={view.initialMode} initialPrompt={view.initialPrompt} initialAgent={view.initialAgent} />}
         {view.kind === "document" && <DocumentView path={view.path} />}
         {view.kind === "review" && <ReviewView number={view.number} />}
       </main>
