@@ -94,9 +94,20 @@ pub fn title_for(path: &str, fm: &Frontmatter, body: &str) -> String {
         })
 }
 
-/// Walks `root` for markdown documents, sorted by path. Skips dot dirs and AGENTS.md.
-pub fn scan(root: &Path) -> Vec<Document> {
-    let mut docs = Vec::new();
+/// One walk of the tree: documents with their bodies, plus every other file with its size.
+/// Checks, the index, and submit all read from this so nothing is scanned twice (review P5).
+#[derive(Debug, Default, Clone)]
+pub struct Scan {
+    pub docs: Vec<Document>,
+    /// Body text (after frontmatter) per document, same order as `docs`.
+    pub bodies: Vec<String>,
+    /// Non-markdown files as (repo-relative path, size in bytes).
+    pub files: Vec<(String, u64)>,
+}
+
+pub fn scan_full(root: &Path) -> Scan {
+    let mut docs: Vec<(Document, String)> = Vec::new();
+    let mut files = Vec::new();
     for entry in WalkDir::new(root)
         .min_depth(1)
         .sort_by_file_name()
@@ -116,6 +127,9 @@ pub fn scan(root: &Path) -> Vec<Document> {
             .to_path_buf();
         let rel_str = rel.to_string_lossy().replace('\\', "/");
         if !rel_str.ends_with(".md") || rel_str == AGENTS_FILE {
+            if rel_str != AGENTS_FILE {
+                files.push((rel_str, entry.metadata().map(|m| m.len()).unwrap_or(0)));
+            }
             continue;
         }
         let text = std::fs::read_to_string(entry.path()).unwrap_or_default();
@@ -123,7 +137,7 @@ pub fn scan(root: &Path) -> Vec<Document> {
             Ok((fm, body)) => (fm, body, None),
             Err(e) => (Frontmatter::default(), text.as_str(), Some(e.to_string())),
         };
-        docs.push(Document {
+        let doc = Document {
             title: title_for(&rel_str, &fm, body),
             description: fm.description.clone(),
             status: fm.status.clone(),
@@ -132,10 +146,21 @@ pub fn scan(root: &Path) -> Vec<Document> {
             owner: fm.owner.clone(),
             frontmatter_error: err,
             path: rel_str,
-        });
+        };
+        docs.push((doc, body.to_string()));
     }
-    docs.sort_by(|a, b| a.path.cmp(&b.path));
-    docs
+    docs.sort_by(|a, b| a.0.path.cmp(&b.0.path));
+    let (docs, bodies): (Vec<Document>, Vec<String>) = docs.into_iter().unzip();
+    Scan {
+        docs,
+        bodies,
+        files,
+    }
+}
+
+/// Walks `root` for markdown documents, sorted by path. Skips dot dirs and AGENTS.md.
+pub fn scan(root: &Path) -> Vec<Document> {
+    scan_full(root).docs
 }
 
 /// Deterministic AGENTS.md content.
@@ -197,14 +222,24 @@ pub fn render_agents_md(config: &KbConfig, docs: &[Document]) -> String {
 }
 
 pub fn agents_md_is_stale(root: &Path) -> bool {
-    let expected = render_agents_md(&read_config(root), &scan(root));
+    agents_md_is_stale_for(root, &scan(root))
+}
+
+/// Staleness against documents already scanned.
+pub fn agents_md_is_stale_for(root: &Path, docs: &[Document]) -> bool {
+    let expected = render_agents_md(&read_config(root), docs);
     std::fs::read_to_string(root.join(AGENTS_FILE))
         .map(|s| s != expected)
         .unwrap_or(true)
 }
 
 pub fn write_agents_md(root: &Path) -> std::io::Result<bool> {
-    let expected = render_agents_md(&read_config(root), &scan(root));
+    write_agents_md_from(root, &scan(root))
+}
+
+/// Regenerates AGENTS.md from documents already scanned. Returns whether the file changed.
+pub fn write_agents_md_from(root: &Path, docs: &[Document]) -> std::io::Result<bool> {
+    let expected = render_agents_md(&read_config(root), docs);
     let p = root.join(AGENTS_FILE);
     if std::fs::read_to_string(&p)
         .map(|s| s == expected)

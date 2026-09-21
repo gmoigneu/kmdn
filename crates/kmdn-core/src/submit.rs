@@ -130,14 +130,15 @@ pub fn submit(
     let base_ref = format!("refs/remotes/origin/{default}");
 
     // 1. Derived index, then a final commit of anything allowed and unsaved.
-    index::write_agents_md(wt)
+    let scan = index::scan_full(wt);
+    index::write_agents_md_from(wt, &scan.docs)
         .map_err(|e| RepoError::Git(git2::Error::from_str(&e.to_string())))?;
     let allowed = allowed_set(DEFAULT_ALLOWED)
         .map_err(|e| RepoError::Git(git2::Error::from_str(&e.to_string())))?;
     commit_allowed(wt, "Update index", author, &allowed)?;
 
     // 2. Checks on the worktree.
-    let findings = checks::run(wt, &checks::Options_::default_cap());
+    let findings = checks::run_with(wt, &checks::Options_::default_cap(), &scan);
     if checks::has_errors(&findings) {
         return Err(SubmitError::Checks(findings));
     }
