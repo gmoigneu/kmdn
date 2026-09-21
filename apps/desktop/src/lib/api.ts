@@ -90,6 +90,7 @@ export interface ThreadWorktree {
   slug: string;
   branch: string;
   path: string;
+  merged_at: number | null;
 }
 
 export interface Finding {

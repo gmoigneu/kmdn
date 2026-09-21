@@ -137,7 +137,7 @@ export function Sidebar() {
               {(move.error || adopt.error) && <p className="text-danger text-[11px] mt-1">{String(move.error ?? adopt.error)}</p>}
             </div>
           )}
-          {threads.data?.length ? threads.data.map((t) => (
+          {threads.data?.filter((t) => !t.merged_at).length ? threads.data.filter((t) => !t.merged_at).map((t) => (
             <button key={t.slug} onClick={() => go({ kind: "thread", slug: t.slug })}
               className={cn("w-full text-left px-2 py-1 rounded-md truncate hover:bg-bg-elevated flex items-center gap-2",
                 view.kind === "thread" && view.slug === t.slug && "bg-bg-elevated")}>
@@ -148,6 +148,17 @@ export function Sidebar() {
               </span>
             </button>
           )) : !hasLocal && <div className="px-2 text-xs text-fg-muted">No threads yet.</div>}
+          {(threads.data?.some((t) => t.merged_at)) && (
+            <details className="mt-1">
+              <summary className="px-2 py-1 text-[11px] text-fg-muted cursor-pointer">Done · {threads.data!.filter((t) => t.merged_at).length}</summary>
+              {threads.data!.filter((t) => t.merged_at).map((t) => (
+                <button key={t.slug} onClick={() => go({ kind: "thread", slug: t.slug })} className="w-full text-left px-2 py-1 rounded-md truncate hover:bg-bg-elevated flex items-center gap-2 opacity-70">
+                  <span className="size-1.5 rounded-full bg-ok" /><span className="truncate">{t.slug}</span>
+                  <span className="ml-auto text-[10px] px-1.5 rounded-full border border-ok text-ok">done</span>
+                </button>
+              ))}
+            </details>
+          )}
         </Section>
         <Section title="Reviews" icon={GitPullRequest} count={reviews.data?.length}>
           {!kb!.authenticated && <div className="px-2 text-xs text-fg-muted">Sign in to see reviews.</div>}

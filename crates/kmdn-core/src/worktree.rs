@@ -15,6 +15,18 @@ pub struct ThreadWorktree {
     pub slug: String,
     pub branch: String,
     pub path: PathBuf,
+    /// Unix seconds when the thread was published (merged). Set by kmdn, read for the Done group.
+    #[serde(default)]
+    pub merged_at: Option<u64>,
+}
+
+pub const MERGED_AFTER_DAYS: u64 = 7;
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 /// Lowercase ASCII slug, hyphen separated, max 48 chars, never empty.
@@ -81,7 +93,12 @@ impl Repo {
         let mut opts = WorktreeAddOptions::new();
         opts.reference(Some(&reference));
         git.worktree(&slug, &path, Some(&opts))?;
-        Ok(ThreadWorktree { slug, branch, path })
+        Ok(ThreadWorktree {
+            slug,
+            branch,
+            path,
+            merged_at: None,
+        })
     }
 
     /// Every thread worktree: branches with the `kmdn/` prefix, plus adopted branches (D45),
@@ -113,6 +130,7 @@ impl Repo {
                 .unwrap_or(false);
             if branch.starts_with(BRANCH_PREFIX) || in_kmdn_dir {
                 out.push(ThreadWorktree {
+                    merged_at: self.thread_merged_at(name),
                     slug: name.to_string(),
                     branch,
                     path,
@@ -120,6 +138,48 @@ impl Repo {
             }
         }
         Ok(out)
+    }
+
+    /// The marker lives in the per-worktree git dir, so it travels with the worktree and
+    /// disappears with it.
+    fn merged_marker(&self, slug: &str) -> PathBuf {
+        self.git()
+            .path()
+            .join("worktrees")
+            .join(slug)
+            .join("kmdn-merged")
+    }
+
+    /// Records that the thread's review was published (D49, 05-git publish).
+    pub fn mark_thread_merged(&self, slug: &str) -> Result<(), RepoError> {
+        let marker = self.merged_marker(slug);
+        if marker.exists() {
+            return Ok(());
+        }
+        std::fs::write(&marker, now_secs().to_string())
+            .map_err(|e| git2::Error::from_str(&e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn thread_merged_at(&self, slug: &str) -> Option<u64> {
+        std::fs::read_to_string(self.merged_marker(slug))
+            .ok()
+            .and_then(|s| s.trim().parse().ok())
+    }
+
+    /// Removes worktrees published more than `days` ago (D49). Returns the slugs removed.
+    pub fn remove_merged_older_than(&self, days: u64) -> Result<Vec<String>, RepoError> {
+        let cutoff = now_secs().saturating_sub(days * 86_400);
+        let mut removed = Vec::new();
+        for t in self.list_thread_worktrees()? {
+            if let Some(at) = t.merged_at {
+                if at <= cutoff {
+                    self.remove_thread_worktree(&t.slug, true)?;
+                    removed.push(t.slug);
+                }
+            }
+        }
+        Ok(removed)
     }
 
     /// Removes the worktree directory and, for `kmdn/` branches, the branch. Adopted branches
@@ -247,6 +307,27 @@ mod tests {
             .unwrap();
         assert_eq!(repo.list_thread_worktrees().unwrap().len(), 1);
         std::fs::remove_dir_all(&wt.path).unwrap();
+        assert!(repo.list_thread_worktrees().unwrap().is_empty());
+    }
+
+    #[test]
+    fn merged_marker_and_cleanup() {
+        let (_dir, repo) = seeded_repo();
+        let wt = repo
+            .create_thread_worktree("a", "done", "refs/heads/main")
+            .unwrap();
+        assert_eq!(repo.list_thread_worktrees().unwrap()[0].merged_at, None);
+        repo.mark_thread_merged(&wt.slug).unwrap();
+        let at = repo.list_thread_worktrees().unwrap()[0].merged_at.unwrap();
+        assert!(at > 0);
+        // fresh merge: kept
+        assert!(repo.remove_merged_older_than(7).unwrap().is_empty());
+        // pretend it was published long ago
+        std::fs::write(repo.merged_marker(&wt.slug), (at - 8 * 86_400).to_string()).unwrap();
+        assert_eq!(
+            repo.remove_merged_older_than(7).unwrap(),
+            vec!["done".to_string()]
+        );
         assert!(repo.list_thread_worktrees().unwrap().is_empty());
     }
 }

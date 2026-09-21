@@ -14,10 +14,13 @@ export function Home() {
   const threads = useQuery({ queryKey: ["threads", root], queryFn: () => api.listThreads(root) });
   const reviews = useQuery({ queryKey: ["reviews", root], queryFn: () => api.listReviews(root), enabled: kb!.authenticated, retry: false });
   const prFor = (branch: string) => reviews.data?.find((p) => p.head_branch === branch);
+  const live = threads.data?.filter((t) => !t.merged_at) ?? [];
   const groups = [
-    { title: "In review", items: threads.data?.filter((t) => prFor(t.branch)) ?? [] },
-    { title: "Draft", items: threads.data?.filter((t) => !prFor(t.branch)) ?? [] },
+    { title: "In review", items: live.filter((t) => prFor(t.branch)) },
+    { title: "Draft", items: live.filter((t) => !prFor(t.branch)) },
   ];
+  const done = threads.data?.filter((t) => t.merged_at) ?? [];
+  const [showDone, setShowDone] = useState(false);
   const create = useMutation({
     mutationFn: (slug: string) => api.createThread(root, slug),
     onSuccess: (t) => { qc.invalidateQueries({ queryKey: ["threads", root] }); setText(""); go({ kind: "thread", slug: t.slug, initialMode: mode }); },
@@ -66,6 +69,24 @@ export function Home() {
             </ul>
           </div>
         ))}
+        {done.length > 0 && (
+          <div>
+            <button onClick={() => setShowDone((d) => !d)} className="mt-10 text-[11px] uppercase tracking-wide text-fg-muted hover:text-fg">Done · {done.length} {showDone ? "▾" : "▸"}</button>
+            {showDone && (
+              <ul className="mt-2 divide-y divide-border rounded-md border border-border opacity-70">
+                {done.map((t) => (
+                  <li key={t.slug}>
+                    <button onClick={() => go({ kind: "thread", slug: t.slug })} className="w-full flex items-center gap-3 px-3 py-2 hover:bg-bg-muted text-left">
+                      <Pencil size={14} className="text-ok" />
+                      <span className="flex-1 truncate">{t.slug}</span>
+                      <span className="text-[10px] text-fg-muted">published {new Date(t.merged_at! * 1000).toLocaleDateString()}, removed after 7 days</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
         {!threads.data?.length && <p className="mt-10 text-fg-muted text-xs">No threads yet. Describe a change above, or open a document and press Edit.</p>}
       </div>
     </div>

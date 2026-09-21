@@ -78,16 +78,18 @@ export function ThreadView({ slug, initialPath, initialMode }: { slug: string; i
 
   if (!t) return <div className="p-6 text-fg-muted">Loading thread…</div>;
   const n = changes.data?.length ?? 0;
-  const status = pr ? (pr.draft ? "draft" : "in review") : "draft";
+  const status = t.merged_at ? "done" : pr ? (pr.draft ? "draft" : "in review") : "draft";
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
       <header className="h-11 shrink-0 border-b border-border flex items-center gap-3 px-4">
         <h1 className="font-medium truncate">{pr?.title ?? t.slug}</h1>
-        <span className={cn("text-[10px] px-1.5 rounded-full border border-border", pr ? "text-accent border-accent" : "text-fg-muted")}>{status}</span>
+        <span className={cn("text-[10px] px-1.5 rounded-full border border-border", t.merged_at ? "text-ok border-ok" : pr ? "text-accent border-accent" : "text-fg-muted")}>{status}</span>
         {pr && <button onClick={() => openUrl(pr.url)} className="text-xs text-fg-muted flex items-center gap-1 hover:text-fg"><ExternalLink size={11} /> #{pr.number}</button>}
         <span className="ml-auto" />
-        {pr ? (
+        {t.merged_at ? (
+          <span className="text-xs text-fg-muted">Published. This thread is removed after 7 days.</span>
+        ) : pr ? (
           <button onClick={() => go({ kind: "review", number: pr.number })} className="h-7 px-3 rounded-md bg-accent text-accent-fg text-xs">View review</button>
         ) : (
           <button disabled={n === 0 || !kb!.authenticated || pendingSet.size > 0} onClick={() => { setTitle(""); setOutcome(null); setSubmitOpen(true); }}

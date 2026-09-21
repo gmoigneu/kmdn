@@ -277,6 +277,39 @@ pub fn rebase_worktree_resolving(
     Ok(RebaseOutcome::Rebased { new_head })
 }
 
+/// Deletes `branch` on the remote (05-git publish: "kmdn deletes the remote branch if the
+/// provider did not"). Missing branches are not an error.
+pub fn delete_remote_branch(
+    repo: &Repository,
+    remote: &str,
+    branch: &str,
+    token: Option<&Token>,
+) -> Result<(), RepoError> {
+    let mut po = PushOptions::new();
+    po.remote_callbacks(callbacks(token));
+    let refspec = format!(":refs/heads/{branch}");
+    let result = match https_url_for(repo, remote)? {
+        None => repo
+            .find_remote(remote)?
+            .push(&[refspec.as_str()], Some(&mut po)),
+        Some(https) => repo
+            .remote_anonymous(&https)?
+            .push(&[refspec.as_str()], Some(&mut po)),
+    };
+    match result {
+        Ok(()) => {}
+        Err(e)
+            if e.code() == git2::ErrorCode::NotFound
+                || e.message().contains("not found")
+                || e.message().contains("does not exist") => {}
+        Err(e) => return Err(e.into()),
+    }
+    let _ = repo
+        .find_reference(&format!("refs/remotes/{remote}/{branch}"))
+        .and_then(|mut r| r.delete());
+    Ok(())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PushOutcome {
     Pushed,
