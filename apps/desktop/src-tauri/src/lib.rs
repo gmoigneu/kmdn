@@ -514,6 +514,11 @@ async fn sync_now(state: State<'_, AppState>, root: String) -> Result<SyncReport
         let base = base_ref(&repo)?;
         let mut threads = Vec::new();
         let mut pushed = Vec::new();
+        let base_oid = repo
+            .git()
+            .find_reference(&base)
+            .ok()
+            .and_then(|r| r.target());
         for t in repo.list_thread_worktrees().map_err(err)? {
             // Adopted branches belong to the user (D45): never rewrite them behind their back.
             if !t.branch.starts_with(BRANCH_PREFIX) {
@@ -526,6 +531,25 @@ async fn sync_now(state: State<'_, AppState>, root: String) -> Result<SyncReport
                 .find_reference(&format!("refs/remotes/origin/{}", t.branch))
                 .ok()
                 .and_then(|r| r.target());
+            if t.merged_at.is_some() {
+                threads.push((t.slug, Err("published".into())));
+                continue;
+            }
+            // Published outside kmdn: the thread head is already contained in main.
+            if let (Some(base_oid), Ok(wrepo)) =
+                (base_oid, kmdn_core::git2::Repository::open(&t.path))
+            {
+                let head = wrepo.head().ok().and_then(|h| h.target());
+                if let Some(head) = head {
+                    if head != base_oid
+                        && wrepo.graph_descendant_of(base_oid, head).unwrap_or(false)
+                    {
+                        let _ = repo.mark_thread_merged(&t.slug);
+                        threads.push((t.slug, Err("published".into())));
+                        continue;
+                    }
+                }
+            }
             match sync::rebase_worktree(&t.path, &base) {
                 Ok(outcome) => {
                     // A clean rebase of a branch that is already under review is force-pushed
@@ -550,6 +574,7 @@ async fn sync_now(state: State<'_, AppState>, root: String) -> Result<SyncReport
                 Err(e) => threads.push((t.slug, Err(e.to_string()))),
             }
         }
+        let _ = repo.remove_merged_older_than(kmdn_core::worktree::MERGED_AFTER_DAYS);
         Ok(SyncReport {
             main,
             threads,
@@ -824,12 +849,23 @@ async fn review_merge(
         let repo = Repo::open(&root).map_err(err)?;
         let remote = repo.remote_info("origin").map_err(err)?;
         let (provider, token, repo_ref) = provider_for(&secrets, &remote)?;
+        let pull = provider.get_pull(&repo_ref, number).map_err(err)?;
         provider
             .merge_pull(&repo_ref, number, method.unwrap_or(MergeMethod::Squash))
             .map_err(err)?;
-        // Bring main forward right away so the merged document shows up.
+        // Publish (05-git-and-review.md): delete the remote branch if the provider did not,
+        // bring main forward, and move the thread to Done (D49). The worktree stays for 7 days.
+        let _ = sync::delete_remote_branch(repo.git(), "origin", &pull.head_branch, Some(&token));
         sync::fetch(repo.git(), "origin", Some(&token)).map_err(err)?;
         let _ = sync::fast_forward_default(&repo);
+        if let Some(t) = repo
+            .list_thread_worktrees()
+            .map_err(err)?
+            .into_iter()
+            .find(|t| t.branch == pull.head_branch)
+        {
+            let _ = repo.mark_thread_merged(&t.slug);
+        }
         Ok(())
     })
     .await

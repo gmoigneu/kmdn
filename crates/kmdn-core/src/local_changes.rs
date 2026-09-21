@@ -94,6 +94,7 @@ pub fn adopt_branch(repo: &Repo, branch: &str) -> Result<ThreadWorktree, RepoErr
         slug,
         branch: branch.to_string(),
         path,
+        merged_at: None,
     })
 }
 
