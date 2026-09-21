@@ -52,6 +52,8 @@ pub struct KbInfo {
     pub dirty_paths: Vec<String>,
     pub config: KbConfig,
     pub user: Author,
+    /// Provider login for the remote's host, when signed in.
+    pub login: Option<String>,
     /// A stored token exists for the remote's host.
     pub authenticated: bool,
 }
@@ -267,6 +269,10 @@ fn kb_info(state: &AppState, path: &str) -> Result<KbInfo, String> {
         head_branch: repo.head_branch().map_err(err)?,
         dirty_paths: repo.dirty_paths().map_err(err)?,
         config: index::read_config(repo.root()),
+        login: remote
+            .as_ref()
+            .and_then(|r| token_for(&state.secrets, r))
+            .map(|(t, _)| t.login),
         user: author_for(&repo, state),
         authenticated,
         remote,

@@ -101,6 +101,7 @@ impl Provider for MockProvider {
             url: format!("https://mock.local/pull/{number}"),
             updated_at: "2026-09-19T00:00:00Z".into(),
             files: vec![],
+            reviewers: vec![],
         };
         self.pulls.lock().unwrap().insert(number, pr.clone());
         Ok(pr)

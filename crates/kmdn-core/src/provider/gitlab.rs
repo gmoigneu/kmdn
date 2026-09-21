@@ -136,6 +136,11 @@ fn parse_mr(v: &Value) -> PullRequest {
         url: s(v, "web_url"),
         updated_at: s(v, "updated_at"),
         files: vec![],
+        reviewers: v
+            .get("reviewers")
+            .and_then(Value::as_array)
+            .map(|a| a.iter().map(|u| s(u, "username")).collect())
+            .unwrap_or_default(),
     }
 }
 
