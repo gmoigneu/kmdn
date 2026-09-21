@@ -88,7 +88,7 @@ kmdn/
     kmdn-cli/             # kmdn-cli check | index | init. Used by CI and scripts.
   apps/
     desktop/              # Tauri 2 shell + React UI. Tauri commands call kmdn-core.
-  packages/               # shared TS: types generated from Rust via ts-rs, UI kit
+  scripts/gen-types.sh    # ts-rs export of the Rust types into apps/desktop/src/lib/generated
   templates/              # new-KB template, CI workflow files
   docs/
   spikes/                 # throwaway, deleted after each spike

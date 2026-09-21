@@ -21,6 +21,7 @@ pub enum RepoError {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum ProviderKind {
     GitHub,
     /// gitlab.com or a self-hosted instance. `host` is the bare hostname.
@@ -54,6 +55,7 @@ impl ProviderKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct RemoteInfo {
     pub provider: ProviderKind,
     pub host: String,

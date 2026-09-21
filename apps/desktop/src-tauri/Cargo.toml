@@ -14,13 +14,14 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-kmdn-core = { path = "../../../crates/kmdn-core" }
+kmdn-core = { path = "../../../crates/kmdn-core", features = ["ts"] }
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-clipboard-manager = "2"
 serde.workspace = true
+ts-rs.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
 base64.workspace = true

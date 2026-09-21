@@ -103,6 +103,7 @@ pub fn fetch(repo: &Repository, remote: &str, token: Option<&Token>) -> Result<(
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum FastForward {
     UpToDate,
     Forwarded {
@@ -150,6 +151,7 @@ pub fn fast_forward_default(repo: &Repo) -> Result<FastForward, RepoError> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ConflictFile {
     pub path: String,
     /// Content on the default branch side.
@@ -160,6 +162,7 @@ pub struct ConflictFile {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum RebaseOutcome {
     UpToDate,
     Rebased {
