@@ -54,12 +54,43 @@ pub fn clone_repo(url: &str, dest: &Path, token: Option<&Token>) -> Result<Repos
     Ok(builder.clone(url, dest)?)
 }
 
+/// The HTTPS URL kmdn should use for `remote` when its configured URL is SSH or git:// (D9).
+/// None means the configured URL is already usable (http(s), file, or a local path).
+pub fn https_url_for(repo: &Repository, remote: &str) -> Result<Option<String>, RepoError> {
+    let r = repo.find_remote(remote)?;
+    let url = r.url().unwrap_or("");
+    let lower = url.to_ascii_lowercase();
+    if lower.starts_with("https://")
+        || lower.starts_with("http://")
+        || lower.starts_with("file://")
+        || url.is_empty()
+        || Path::new(url).exists()
+    {
+        return Ok(None);
+    }
+    match crate::repo::RemoteInfo::parse(url) {
+        Ok(info) => Ok(Some(info.https_url)),
+        Err(_) => Ok(None),
+    }
+}
+
 pub fn fetch(repo: &Repository, remote: &str, token: Option<&Token>) -> Result<(), RepoError> {
-    let mut r = repo.find_remote(remote)?;
     let mut fo = FetchOptions::new();
     fo.remote_callbacks(callbacks(token));
     fo.prune(git2::FetchPrune::On);
-    r.fetch::<&str>(&[], Some(&mut fo), None)?;
+    match https_url_for(repo, remote)? {
+        None => {
+            let mut r = repo.find_remote(remote)?;
+            r.fetch::<&str>(&[], Some(&mut fo), None)?;
+        }
+        Some(https) => {
+            // The user's SSH remote stays untouched; kmdn fetches over HTTPS with its token
+            // into the same remote-tracking namespace.
+            let mut anon = repo.remote_anonymous(&https)?;
+            let spec = format!("+refs/heads/*:refs/remotes/{remote}/*");
+            anon.fetch(&[spec.as_str()], Some(&mut fo), None)?;
+        }
+    }
     Ok(())
 }
 
@@ -276,11 +307,17 @@ pub fn push_with_lease(
                 .unwrap_or_else(|| "absent".into()),
         });
     }
-    let mut r = repo.find_remote(remote)?;
     let mut po = PushOptions::new();
     po.remote_callbacks(callbacks(token));
     let refspec = format!("+refs/heads/{branch}:refs/heads/{branch}");
-    r.push(&[refspec.as_str()], Some(&mut po))?;
+    match https_url_for(repo, remote)? {
+        None => repo
+            .find_remote(remote)?
+            .push(&[refspec.as_str()], Some(&mut po))?,
+        Some(https) => repo
+            .remote_anonymous(&https)?
+            .push(&[refspec.as_str()], Some(&mut po))?,
+    }
     // libgit2 does not move the remote-tracking ref on push; mirror what git does.
     let local = repo
         .find_reference(&format!("refs/heads/{branch}"))?
@@ -464,5 +501,27 @@ mod tests {
             Repository::open(&wt.path).unwrap().state(),
             git2::RepositoryState::Clean
         );
+    }
+
+    #[test]
+    fn ssh_and_git_remotes_are_rewritten_to_https_for_network_work() {
+        let d = tempfile::tempdir().unwrap();
+        let repo = Repository::init(d.path()).unwrap();
+        repo.remote("origin", "git@github.com:acme/kb.git").unwrap();
+        repo.remote("lab", "ssh://git@gitlab.example.org:2222/team/kb.git")
+            .unwrap();
+        repo.remote("web", "https://github.com/acme/kb.git")
+            .unwrap();
+        repo.remote("local", "file:///tmp/whatever.git").unwrap();
+        assert_eq!(
+            https_url_for(&repo, "origin").unwrap().as_deref(),
+            Some("https://github.com/acme/kb.git")
+        );
+        assert_eq!(
+            https_url_for(&repo, "lab").unwrap().as_deref(),
+            Some("https://gitlab.example.org/team/kb.git")
+        );
+        assert_eq!(https_url_for(&repo, "web").unwrap(), None);
+        assert_eq!(https_url_for(&repo, "local").unwrap(), None);
     }
 }
