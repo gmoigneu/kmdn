@@ -6,7 +6,41 @@ use git2::{IndexAddOption, Repository, Signature};
 
 use crate::commit::Author;
 use crate::index;
-use crate::repo::RepoError;
+use crate::repo::{ProviderKind, RepoError};
+
+/// Optional CI job that runs `kmdn-cli check` on pull requests (D60). Opt-in, never automatic.
+pub const GITHUB_CI_TEMPLATE: &str = include_str!("../../../templates/ci/github-kmdn-check.yml");
+pub const GITLAB_CI_TEMPLATE: &str = include_str!("../../../templates/ci/gitlab-kmdn-check.yml");
+
+/// Where the CI check lives for a provider, relative to the repo root.
+pub fn ci_check_path(provider: &ProviderKind) -> &'static str {
+    match provider {
+        ProviderKind::GitHub => ".github/workflows/kmdn-check.yml",
+        _ => ".gitlab-ci.yml",
+    }
+}
+
+/// Writes the CI check for `provider` into `root`. Refuses to overwrite an existing file so a
+/// hand-maintained pipeline is never clobbered.
+pub fn write_ci_check(root: &Path, provider: &ProviderKind) -> std::io::Result<std::path::PathBuf> {
+    let rel = ci_check_path(provider);
+    let full = root.join(rel);
+    if full.exists() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            format!("{rel} already exists; add the kmdn-check job to it by hand"),
+        ));
+    }
+    if let Some(parent) = full.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let body = match provider {
+        ProviderKind::GitHub => GITHUB_CI_TEMPLATE,
+        _ => GITLAB_CI_TEMPLATE,
+    };
+    std::fs::write(&full, body)?;
+    Ok(full)
+}
 
 pub fn write_template(dest: &Path, name: &str, description: &str) -> std::io::Result<()> {
     std::fs::create_dir_all(dest.join(index::CONFIG_DIR))?;
@@ -95,5 +129,24 @@ mod tests {
             repo.find_remote("origin").unwrap().url(),
             Some("https://github.com/acme/kb.git")
         );
+    }
+
+    #[test]
+    fn writes_the_ci_check_once() {
+        let d = tempfile::tempdir().unwrap();
+        let p = write_ci_check(d.path(), &ProviderKind::GitHub).unwrap();
+        assert!(p.ends_with(".github/workflows/kmdn-check.yml"));
+        assert!(std::fs::read_to_string(&p)
+            .unwrap()
+            .contains("kmdn-cli check"));
+        assert!(write_ci_check(d.path(), &ProviderKind::GitHub).is_err());
+        let g = write_ci_check(
+            d.path(),
+            &ProviderKind::GitLab {
+                host: "gitlab.com".into(),
+            },
+        )
+        .unwrap();
+        assert!(g.ends_with(".gitlab-ci.yml"));
     }
 }

@@ -36,6 +36,10 @@ export function CommandPalette() {
     onSuccess: (t) => { qc.invalidateQueries({ queryKey: ["threads", root] }); go({ kind: "thread", slug: t.slug }); },
   });
   const sync = useMutation({ mutationFn: () => api.syncNow(root!), onSuccess: () => qc.invalidateQueries() });
+  const addCi = useMutation({
+    mutationFn: () => api.addCiCheck(root!),
+    onSuccess: (t) => { qc.invalidateQueries({ queryKey: ["threads", root] }); go({ kind: "thread", slug: t.slug }); },
+  });
 
   const entries = useMemo<Entry[]>(() => {
     if (!root) return [];
@@ -45,13 +49,14 @@ export function CommandPalette() {
       { id: "a:home", group: "Actions", label: "Go home", icon: Layers, run: () => go({ kind: "home" }) },
       { id: "a:sidebar", group: "Actions", label: "Toggle sidebar", icon: Layers, run: toggleSidebar },
       { id: "a:appearance", group: "Actions", label: "Appearance", hint: "theme, fonts, text size", icon: Palette, run: () => openAppearance(true) },
+      { id: "a:ci", group: "Actions", label: "Add CI check to this knowledge base", hint: "opens a thread with the kmdn-cli check job (optional, D60)", icon: Plus, run: () => addCi.mutate() },
       { id: "a:diagnostics", group: "Actions", label: "Copy diagnostics", hint: "version, agents, last log lines; no document text", icon: ClipboardCopy, run: () => { api.diagnostics().then((t) => writeText(t)).catch(() => {}); } },
     ];
     for (const t of threads.data ?? []) list.push({ id: `t:${t.slug}`, group: "Threads", label: t.slug, hint: t.branch, icon: Layers, run: () => go({ kind: "thread", slug: t.slug }) });
     for (const p of reviews.data ?? []) list.push({ id: `r:${p.number}`, group: "Reviews", label: p.title, hint: `#${p.number} by ${p.author}`, icon: GitPullRequest, run: () => go({ kind: "review", number: p.number }) });
     for (const d of docs.data ?? []) list.push({ id: `d:${d.path}`, group: "Documents", label: d.title, hint: d.path, icon: FileText, run: () => go({ kind: "document", path: d.path }) });
     return list;
-  }, [root, q, threads.data, reviews.data, docs.data, go, toggleSidebar, openAppearance, newThread, sync]);
+  }, [root, q, threads.data, reviews.data, docs.data, go, toggleSidebar, openAppearance, newThread, sync, addCi]);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();

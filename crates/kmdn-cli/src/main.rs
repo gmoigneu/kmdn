@@ -36,6 +36,12 @@ enum Cmd {
         #[arg(long, default_value = "Knowledge base")]
         name: String,
     },
+    /// Write the optional CI job that runs `kmdn-cli check` on pull requests.
+    Ci {
+        /// github or gitlab
+        #[arg(long, default_value = "github")]
+        provider: String,
+    },
 }
 
 fn main() -> ExitCode {
@@ -86,6 +92,22 @@ fn run() -> Result<ExitCode> {
                         "AGENTS.md already current"
                     }
                 );
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        Cmd::Ci { provider } => {
+            let kind = if provider.eq_ignore_ascii_case("gitlab") {
+                kmdn_core::repo::ProviderKind::GitLab {
+                    host: "gitlab.com".into(),
+                }
+            } else {
+                kmdn_core::repo::ProviderKind::GitHub
+            };
+            let written = kmdn_core::bootstrap::write_ci_check(&root, &kind)?;
+            if cli.json {
+                println!("{}", serde_json::json!({ "written": written }));
+            } else {
+                println!("wrote {}", written.display());
             }
             Ok(ExitCode::SUCCESS)
         }

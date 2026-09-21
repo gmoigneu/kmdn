@@ -1147,6 +1147,30 @@ async fn agent_revert(
     .await
 }
 
+/// Opens a thread that adds the optional CI check for this knowledge base (D60). The user
+/// reviews and submits it like any other change; nothing is written to main directly.
+#[tauri::command]
+async fn add_ci_check(state: State<'_, AppState>, root: String) -> Result<ThreadWorktree, String> {
+    let state = state.inner().clone();
+    blocking(move || {
+        let repo = Repo::open(&root).map_err(err)?;
+        let remote = repo.remote_info("origin").map_err(err)?;
+        let base = base_ref(&repo)?;
+        let author = author_for(&repo, &state);
+        let wt = repo
+            .create_thread_worktree(&author.name, "add kmdn ci check", &base)
+            .map_err(err)?;
+        let written = bootstrap::write_ci_check(&wt.path, &remote.provider).map_err(err)?;
+        let rel = written
+            .strip_prefix(&wt.path)
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+        commit_paths(&wt.path, "Add the kmdn CI check", &author, &[rel], &[]).map_err(err)?;
+        Ok(wt)
+    })
+    .await
+}
+
 // ---------- drafts (D27): unsaved editor text mirrored to local SQLite
 
 #[tauri::command]
@@ -1536,6 +1560,7 @@ pub fn run() {
             agent_pending,
             agent_accept,
             agent_revert,
+            add_ci_check,
             draft_save,
             draft_get,
             draft_clear,
