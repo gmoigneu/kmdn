@@ -131,7 +131,7 @@ fn author_for(repo: &Repo, state: &AppState) -> Author {
                     .map(|s| s.trim().to_string())
                     .unwrap_or_else(|_| format!("{}@users.noreply.github.com", stored.login));
             return Author {
-                name: stored.login.clone(),
+                name: stored.name.clone().unwrap_or_else(|| stored.login.clone()),
                 email,
             };
         }
@@ -1232,6 +1232,7 @@ fn store_token(
             login: user.login.clone(),
             token: token.to_string(),
             kind: kind.into(),
+            name: user.name.clone().filter(|n| !n.trim().is_empty()),
         })
         .map_err(err)?;
     let email = user

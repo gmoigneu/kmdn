@@ -220,7 +220,9 @@ impl Provider for GitHub {
         let mut out = Vec::new();
         for v in &items {
             let mut pr = parse_pull(v);
-            pr.files = self.pull_files(repo, pr.number)?;
+            // One failing files call must not hide every review (D22): keep the PR and let the
+            // markdown filter see an empty list, which keeps it visible.
+            pr.files = self.pull_files(repo, pr.number).unwrap_or_default();
             out.push(pr);
         }
         Ok(out)
