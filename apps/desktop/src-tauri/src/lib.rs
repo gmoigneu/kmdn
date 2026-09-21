@@ -137,6 +137,94 @@ fn author_for(repo: &Repo, state: &AppState) -> Author {
     }
 }
 
+/// A path from the webview, kept inside `base`: relative, no `..`, no absolute prefix (review S5).
+fn inside(base: &Path, rel: &str) -> Result<PathBuf, String> {
+    use std::path::Component;
+    let p = Path::new(rel);
+    if rel.is_empty() || p.is_absolute() || rel.starts_with('~') {
+        return Err(format!("invalid path: {rel}"));
+    }
+    let mut out = PathBuf::new();
+    for c in p.components() {
+        match c {
+            Component::Normal(n) => out.push(n),
+            Component::CurDir => {}
+            _ => return Err(format!("invalid path: {rel}")),
+        }
+    }
+    if out.as_os_str().is_empty() {
+        return Err(format!("invalid path: {rel}"));
+    }
+    let full = base.join(&out);
+    // Refuse to follow a symlink out of the base for anything that already exists.
+    let mut cursor = base.to_path_buf();
+    for c in out.components() {
+        cursor.push(c);
+        match std::fs::symlink_metadata(&cursor) {
+            Ok(m) if m.file_type().is_symlink() => {
+                return Err(format!("refusing to follow a symlink: {rel}"))
+            }
+            Ok(_) => {}
+            Err(_) => break,
+        }
+    }
+    Ok(full)
+}
+
+/// A destination folder chosen in the UI: absolute, normalized, not a system directory,
+/// and empty or absent.
+fn safe_dest(dest: &str) -> Result<PathBuf, String> {
+    use std::path::Component;
+    let p = Path::new(dest);
+    if !p.is_absolute() {
+        return Err("choose an absolute folder".into());
+    }
+    let mut out = PathBuf::new();
+    for c in p.components() {
+        match c {
+            Component::ParentDir => return Err("folder path may not contain ..".into()),
+            Component::CurDir => {}
+            other => out.push(other.as_os_str()),
+        }
+    }
+    let s = out.to_string_lossy();
+    let forbidden = [
+        "/",
+        "/bin",
+        "/boot",
+        "/dev",
+        "/etc",
+        "/lib",
+        "/proc",
+        "/root",
+        "/run",
+        "/sbin",
+        "/sys",
+        "/usr",
+        "/var",
+        "/System",
+        "/Library",
+        "/Applications",
+    ];
+    if forbidden
+        .iter()
+        .any(|f| s == *f || (f.len() > 1 && s.starts_with(&format!("{f}/"))))
+    {
+        return Err(format!(
+            "{s} is a system location; pick a folder in your home directory"
+        ));
+    }
+    if out.exists()
+        && out
+            .read_dir()
+            .map(|mut d| d.next().is_some())
+            .unwrap_or(true)
+    {
+        return Err(format!("{s} already exists and is not empty"));
+    }
+    Ok(out)
+}
+
 fn base_ref(repo: &Repo) -> Result<String, String> {
     let default = repo.default_branch().map_err(err)?;
     let remote = format!("refs/remotes/origin/{default}");
@@ -187,18 +275,7 @@ async fn clone_kb(state: State<'_, AppState>, url: String, dest: String) -> Resu
     let root = blocking(move || {
         let remote = RemoteInfo::parse(&url).map_err(err)?;
         let token = token_for(&secrets, &remote).map(|(_, t)| t);
-        let dest = PathBuf::from(dest);
-        if dest.exists()
-            && dest
-                .read_dir()
-                .map(|mut d| d.next().is_some())
-                .unwrap_or(false)
-        {
-            return Err(format!(
-                "{} already exists and is not empty",
-                dest.display()
-            ));
-        }
+        let dest = safe_dest(&dest)?;
         sync::clone_repo(&remote.https_url, &dest, token.as_ref()).map_err(err)?;
         Ok(dest)
     })
@@ -233,7 +310,7 @@ async fn create_kb(
             name: stored.login.clone(),
             email,
         };
-        let dest = PathBuf::from(dest);
+        let dest = safe_dest(&dest)?;
         let repo = bootstrap::init_new_kb(
             &dest,
             &name,
@@ -261,7 +338,8 @@ fn list_documents(root: String) -> Vec<Document> {
 
 #[tauri::command]
 fn read_document(root: String, path: String) -> Result<String, String> {
-    std::fs::read_to_string(Path::new(&root).join(&path)).map_err(err)
+    let full = inside(Path::new(&root), &path)?;
+    std::fs::read_to_string(full).map_err(err)
 }
 
 #[tauri::command]
@@ -314,7 +392,16 @@ fn save_document(
 ) -> Result<Option<String>, String> {
     let repo = Repo::open(&root).map_err(err)?;
     let wt = worktree_for(&repo, &slug)?;
-    let full = wt.path.join(&path);
+    let full = inside(&wt.path, &path)?;
+    let allowed = allowed_set(DEFAULT_ALLOWED).map_err(err)?;
+    if !allowed.is_match(&path)
+        || path.eq_ignore_ascii_case(index::AGENTS_FILE)
+        || path.to_ascii_lowercase().starts_with(".kmdn/")
+    {
+        return Err(format!(
+            "{path}: only markdown documents and assets can be saved here"
+        ));
+    }
     if let Some(parent) = full.parent() {
         std::fs::create_dir_all(parent).map_err(err)?;
     }
