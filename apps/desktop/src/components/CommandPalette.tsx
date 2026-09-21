@@ -1,7 +1,8 @@
 // Cmd-K palette (D52): documents, threads, reviews, actions. Every action also has a mouse path.
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FileText, GitPullRequest, Layers, Palette, Plus, RefreshCw, Search } from "lucide-react";
+import { ClipboardCopy, FileText, GitPullRequest, Layers, Palette, Plus, RefreshCw, Search } from "lucide-react";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { api } from "@/lib/api";
 import { useUi } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -44,6 +45,7 @@ export function CommandPalette() {
       { id: "a:home", group: "Actions", label: "Go home", icon: Layers, run: () => go({ kind: "home" }) },
       { id: "a:sidebar", group: "Actions", label: "Toggle sidebar", icon: Layers, run: toggleSidebar },
       { id: "a:appearance", group: "Actions", label: "Appearance", hint: "theme, fonts, text size", icon: Palette, run: () => openAppearance(true) },
+      { id: "a:diagnostics", group: "Actions", label: "Copy diagnostics", hint: "version, agents, last log lines; no document text", icon: ClipboardCopy, run: () => { api.diagnostics().then((t) => writeText(t)).catch(() => {}); } },
     ];
     for (const t of threads.data ?? []) list.push({ id: `t:${t.slug}`, group: "Threads", label: t.slug, hint: t.branch, icon: Layers, run: () => go({ kind: "thread", slug: t.slug }) });
     for (const p of reviews.data ?? []) list.push({ id: `r:${p.number}`, group: "Reviews", label: p.title, hint: `#${p.number} by ${p.author}`, icon: GitPullRequest, run: () => go({ kind: "review", number: p.number }) });
