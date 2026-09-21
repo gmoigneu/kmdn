@@ -6,7 +6,7 @@ use std::path::{Component, Path, PathBuf};
 use pulldown_cmark::{Event, Options, Parser, Tag};
 use serde::{Deserialize, Serialize};
 
-use crate::index::{self, is_excluded_dir};
+use crate::index;
 
 pub const DEFAULT_ASSET_CAP: u64 = 5 * 1024 * 1024;
 const IMAGE_EXT: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "svg"];
@@ -94,9 +94,15 @@ fn links_in(body: &str) -> Vec<String> {
 }
 
 pub fn run(root: &Path, opts: &Options_) -> Vec<Finding> {
+    run_with(root, opts, &index::scan_full(root))
+}
+
+/// Checks over an existing scan, so callers that already walked the tree (submit) do not
+/// read every document again (review P5).
+pub fn run_with(root: &Path, opts: &Options_, scan: &index::Scan) -> Vec<Finding> {
     let mut findings = Vec::new();
 
-    for doc in index::scan(root) {
+    for (doc, body) in scan.docs.iter().zip(scan.bodies.iter()) {
         if let Some(err) = &doc.frontmatter_error {
             findings.push(Finding {
                 level: Level::Error,
@@ -105,11 +111,7 @@ pub fn run(root: &Path, opts: &Options_) -> Vec<Finding> {
                 message: err.clone(),
             });
         }
-        let text = std::fs::read_to_string(root.join(&doc.path)).unwrap_or_default();
-        let body = crate::frontmatter::split(&text)
-            .map(|s| s.body.to_string())
-            .unwrap_or(text.clone());
-        for link in links_in(&body) {
+        for link in links_in(body) {
             if let Some(p) = resolve_link(root, &doc.path, &link) {
                 if !p.exists() {
                     findings.push(Finding {
@@ -123,29 +125,12 @@ pub fn run(root: &Path, opts: &Options_) -> Vec<Finding> {
         }
     }
 
-    for entry in walkdir::WalkDir::new(root)
-        .min_depth(1)
-        .into_iter()
-        .filter_entry(|e| {
-            !(e.file_type().is_dir() && is_excluded_dir(&e.file_name().to_string_lossy()))
-        })
-        .flatten()
-    {
-        if !entry.file_type().is_file() {
-            continue;
-        }
-        let rel = entry
-            .path()
-            .strip_prefix(root)
-            .unwrap_or(entry.path())
-            .to_string_lossy()
-            .replace('\\', "/");
+    for (rel, size) in &scan.files {
         let in_assets = rel.split('/').any(|seg| seg == "assets");
         if !in_assets {
             continue;
         }
-        let ext = entry
-            .path()
+        let ext = Path::new(rel)
             .extension()
             .map(|e| e.to_string_lossy().to_ascii_lowercase())
             .unwrap_or_default();
@@ -157,12 +142,11 @@ pub fn run(root: &Path, opts: &Options_) -> Vec<Finding> {
                 message: format!("not an image: .{ext}"),
             });
         }
-        let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-        if size > opts.asset_cap {
+        if *size > opts.asset_cap {
             findings.push(Finding {
                 level: Level::Error,
                 kind: Kind::OversizeAsset,
-                path: rel,
+                path: rel.clone(),
                 message: format!("{size} bytes exceeds cap of {} bytes", opts.asset_cap),
             });
         }
@@ -181,7 +165,7 @@ pub fn run(root: &Path, opts: &Options_) -> Vec<Finding> {
         }
     }
 
-    if index::agents_md_is_stale(root) {
+    if index::agents_md_is_stale_for(root, &scan.docs) {
         findings.push(Finding {
             level: Level::Error,
             kind: Kind::StaleIndex,
