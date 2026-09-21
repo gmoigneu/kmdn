@@ -53,6 +53,8 @@ pub struct KbInfo {
 pub struct SyncReport {
     pub main: FastForward,
     pub threads: Vec<(String, Result<RebaseOutcome, String>)>,
+    /// Threads whose rebased branch was pushed to keep the open review current (05-git sync).
+    pub pushed: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -503,6 +505,7 @@ async fn sync_now(state: State<'_, AppState>, root: String) -> Result<SyncReport
             return Ok(SyncReport {
                 main: FastForward::Skipped("no origin remote".into()),
                 threads: vec![],
+                pushed: vec![],
             });
         };
         let token = token_for(&secrets, &remote).map(|(_, t)| t);
@@ -510,18 +513,48 @@ async fn sync_now(state: State<'_, AppState>, root: String) -> Result<SyncReport
         let main = sync::fast_forward_default(&repo).map_err(err)?;
         let base = base_ref(&repo)?;
         let mut threads = Vec::new();
+        let mut pushed = Vec::new();
         for t in repo.list_thread_worktrees().map_err(err)? {
             // Adopted branches belong to the user (D45): never rewrite them behind their back.
             if !t.branch.starts_with(BRANCH_PREFIX) {
                 threads.push((t.slug, Err("adopted branch, left as is".into())));
                 continue;
             }
+            // The tracking ref before the rebase is the lease for the push afterwards.
+            let tracking_before = repo
+                .git()
+                .find_reference(&format!("refs/remotes/origin/{}", t.branch))
+                .ok()
+                .and_then(|r| r.target());
             match sync::rebase_worktree(&t.path, &base) {
-                Ok(outcome) => threads.push((t.slug, Ok(outcome))),
+                Ok(outcome) => {
+                    // A clean rebase of a branch that is already under review is force-pushed
+                    // with a lease so the PR shows the rebased head (05-git-and-review.md, Sync).
+                    if matches!(outcome, RebaseOutcome::Rebased { .. }) && tracking_before.is_some()
+                    {
+                        if let Ok(wrepo) = kmdn_core::git2::Repository::open(&t.path) {
+                            match sync::push_with_lease(
+                                &wrepo,
+                                "origin",
+                                &t.branch,
+                                tracking_before,
+                                token.as_ref(),
+                            ) {
+                                Ok(sync::PushOutcome::Pushed) => pushed.push(t.slug.clone()),
+                                Ok(sync::PushOutcome::LeaseFailed { .. }) | Err(_) => {}
+                            }
+                        }
+                    }
+                    threads.push((t.slug, Ok(outcome)));
+                }
                 Err(e) => threads.push((t.slug, Err(e.to_string()))),
             }
         }
-        Ok(SyncReport { main, threads })
+        Ok(SyncReport {
+            main,
+            threads,
+            pushed,
+        })
     })
     .await
 }
