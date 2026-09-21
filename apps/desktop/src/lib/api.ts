@@ -181,4 +181,7 @@ export const api = {
   agentCancel: (slug: string) => invoke<void>("agent_cancel", { slug }),
   agentStop: (slug: string) => invoke<void>("agent_stop", { slug }),
   agentSession: (slug: string) => invoke<SessionInfo | null>("agent_session", { slug }),
+  agentPending: (root: string, slug: string) => invoke<string[]>("agent_pending", { root, slug }),
+  agentAccept: (root: string, slug: string, paths: string[]) => invoke<string | null>("agent_accept", { root, slug, paths }),
+  agentRevert: (root: string, slug: string, paths: string[]) => invoke<void>("agent_revert", { root, slug, paths }),
 };

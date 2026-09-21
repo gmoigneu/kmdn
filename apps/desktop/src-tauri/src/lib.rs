@@ -7,7 +7,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use kmdn_core::bootstrap;
-use kmdn_core::commit::{allowed_set, commit_allowed, Author, DEFAULT_ALLOWED};
+use kmdn_core::commit::{
+    allowed_set, commit_allowed_except, commit_paths, revert_paths, Author, DEFAULT_ALLOWED,
+};
 use kmdn_core::diff::FileChange;
 use kmdn_core::index::{self, Document, KbConfig};
 use kmdn_core::local_changes::{self, LocalChanges};
@@ -411,11 +413,17 @@ fn save_document(
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or(path.clone());
     let allowed = allowed_set(DEFAULT_ALLOWED).map_err(err)?;
-    let oid = commit_allowed(
+    // Agent edits stay out of the human's commits until accepted (D15).
+    let pending: std::collections::HashSet<String> = agents::read_pending(&state.data_dir, &slug)
+        .paths
+        .into_iter()
+        .collect();
+    let oid = commit_allowed_except(
         &wt.path,
         &format!("Update {title}"),
         &author_for(&repo, &state),
         &allowed,
+        &pending,
     )
     .map_err(err)?;
     Ok(oid.map(|o| o.to_string()))
@@ -859,6 +867,79 @@ fn agent_session(state: State<AppState>, slug: String) -> Option<agents::Session
     state.agents.info(&slug)
 }
 
+/// Agent edits waiting for review, limited to paths that still differ from the base.
+#[tauri::command]
+fn agent_pending(
+    state: State<AppState>,
+    root: String,
+    slug: String,
+) -> Result<Vec<String>, String> {
+    let repo = Repo::open(&root).map_err(err)?;
+    let wt = worktree_for(&repo, &slug)?;
+    let p = agents::read_pending(&state.data_dir, &slug);
+    if p.paths.is_empty() {
+        return Ok(vec![]);
+    }
+    let changed: std::collections::HashSet<String> =
+        kmdn_core::diff::thread_changes(&wt.path, &base_ref(&repo)?)
+            .map_err(err)?
+            .into_iter()
+            .map(|c| c.path)
+            .collect();
+    Ok(p.paths
+        .into_iter()
+        .filter(|x| changed.contains(x))
+        .collect())
+}
+
+/// Commits accepted agent edits as `Agent (<name>): <request>` with the agent as co-author.
+#[tauri::command]
+fn agent_accept(
+    state: State<AppState>,
+    root: String,
+    slug: String,
+    paths: Vec<String>,
+) -> Result<Option<String>, String> {
+    let repo = Repo::open(&root).map_err(err)?;
+    let wt = worktree_for(&repo, &slug)?;
+    let p = agents::read_pending(&state.data_dir, &slug);
+    let label = p.agent.map(|a| a.label()).unwrap_or("agent");
+    let request = if p.request.trim().is_empty() {
+        "edits".to_string()
+    } else {
+        p.request.chars().take(60).collect::<String>()
+    };
+    let trailer = format!("Co-Authored-By: {label} <agent@kmdn.local>");
+    let oid = commit_paths(
+        &wt.path,
+        &format!("Agent ({label}): {request}"),
+        &author_for(&repo, &state),
+        &paths,
+        &[trailer],
+    )
+    .map_err(err)?;
+    agents::clear_pending(&state.data_dir, &slug, &paths);
+    Ok(oid.map(|o| o.to_string()))
+}
+
+/// Restores the files to their last committed content and forgets the pending edits.
+#[tauri::command]
+fn agent_revert(
+    state: State<AppState>,
+    root: String,
+    slug: String,
+    paths: Vec<String>,
+) -> Result<(), String> {
+    let repo = Repo::open(&root).map_err(err)?;
+    let wt = worktree_for(&repo, &slug)?;
+    for p in &paths {
+        inside(&wt.path, p)?;
+    }
+    revert_paths(&wt.path, &paths).map_err(err)?;
+    agents::clear_pending(&state.data_dir, &slug, &paths);
+    Ok(())
+}
+
 // ---------- auth
 
 #[tauri::command]
@@ -1067,6 +1148,9 @@ pub fn run() {
             agent_cancel,
             agent_stop,
             agent_session,
+            agent_pending,
+            agent_accept,
+            agent_revert,
             auth_status,
             auth_start_device_flow,
             auth_poll_device_flow,
