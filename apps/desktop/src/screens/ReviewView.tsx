@@ -6,32 +6,34 @@ import { Check, ExternalLink, GitMerge, MessageSquare, PanelRightOpen, X } from 
 import { api, type FileChange } from "@/lib/api";
 import { useUi } from "@/lib/store";
 import { cn } from "@/lib/utils";
-import { renderDiff, commentAnchor, type RenderedRow } from "@/lib/rdiff/render";
+import { renderDiff, commentAnchor, groupRows, type RenderedRow } from "@/lib/rdiff/render";
+import { UnchangedRun } from "@/components/RenderedDiff";
 import { RenderedMarkdown } from "@/components/RenderedMarkdown";
 
 const statusLabel: Record<FileChange["status"], string> = { added: "A", modified: "M", deleted: "D", renamed: "R" };
 
 function FileDiff({ change, onComment }: { change: FileChange; onComment: (path: string, row: RenderedRow) => void }) {
-  const rows = useMemo(() => renderDiff(change.old ?? "", change.new ?? ""), [change.old, change.new]);
+  const groups = useMemo(() => groupRows(renderDiff(change.old ?? "", change.new ?? "")), [change.old, change.new]);
   if (change.binary) return <p className="text-fg-muted text-xs px-3">Binary file, {change.status}.</p>;
+  const renderRow = (r: RenderedRow, i: number) => {
+    const tone = r.type === "added" ? "border-l-ok" : r.type === "removed" ? "border-l-danger" : r.type === "modified" ? "border-l-warn" : "border-l-transparent";
+    return (
+      <div key={i} className={cn("group relative px-3 py-1 border-l-2", tone, r.type === "equal" && "opacity-60")}>
+        <button onClick={() => onComment(change.path, r)} title="Comment on this block"
+          className="absolute -left-7 top-1 size-5 rounded border border-border bg-bg-elevated text-fg-muted opacity-0 group-hover:opacity-100 grid place-items-center">
+          <MessageSquare size={11} />
+        </button>
+        {r.type === "modified" ? (
+          <div className="grid grid-cols-2 gap-3"><div className="opacity-70" dangerouslySetInnerHTML={{ __html: r.old ?? "" }} /><div dangerouslySetInnerHTML={{ __html: r.new ?? "" }} /></div>
+        ) : (
+          <div dangerouslySetInnerHTML={{ __html: r.new ?? r.old ?? "" }} />
+        )}
+      </div>
+    );
+  };
   return (
     <div className="rdiff text-[14px]">
-      {rows.map((r, i) => {
-        const tone = r.type === "added" ? "border-l-ok" : r.type === "removed" ? "border-l-danger" : r.type === "modified" ? "border-l-warn" : "border-l-transparent";
-        return (
-          <div key={i} className={cn("group relative px-3 py-1 border-l-2", tone, r.type === "equal" && "opacity-60")}>
-            <button onClick={() => onComment(change.path, r)} title="Comment on this block"
-              className="absolute -left-7 top-1 size-5 rounded border border-border bg-bg-elevated text-fg-muted opacity-0 group-hover:opacity-100 grid place-items-center">
-              <MessageSquare size={11} />
-            </button>
-            {r.type === "modified" ? (
-              <div className="grid grid-cols-2 gap-3"><div className="opacity-70" dangerouslySetInnerHTML={{ __html: r.old ?? "" }} /><div dangerouslySetInnerHTML={{ __html: r.new ?? "" }} /></div>
-            ) : (
-              <div dangerouslySetInnerHTML={{ __html: r.new ?? r.old ?? "" }} />
-            )}
-          </div>
-        );
-      })}
+      {groups.map((g, i) => g.kind === "row" ? renderRow(g.row, g.index) : <UnchangedRun key={`u${i}`} group={g} render={renderRow} />)}
     </div>
   );
 }

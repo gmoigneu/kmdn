@@ -1,6 +1,6 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { FileChange } from "@/lib/api";
-import { renderDiff, type RenderedRow } from "@/lib/rdiff/render";
+import { groupRows, renderDiff, type RenderedRow, type RowGroup } from "@/lib/rdiff/render";
 import { cn } from "@/lib/utils";
 
 function Row({ row }: { row: RenderedRow }) {
@@ -19,8 +19,23 @@ function Row({ row }: { row: RenderedRow }) {
   );
 }
 
+/** A folded run of unchanged blocks; one click renders them (review P1, D44). */
+export function UnchangedRun({ group, render }: { group: Extract<RowGroup, { kind: "unchanged" }>; render: (row: RenderedRow, index: number) => React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  if (open) return <>{group.rows.map((r, k) => render(r, group.start + k))}</>;
+  return (
+    <button onClick={() => setOpen(true)} className="w-full text-left px-3 py-1 text-[11px] text-fg-muted border-l-2 border-l-transparent hover:bg-bg-muted">
+      {group.rows.length} unchanged block{group.rows.length === 1 ? "" : "s"} hidden. Show
+    </button>
+  );
+}
+
 export function RenderedDiff({ change }: { change: FileChange }) {
-  const rows = useMemo(() => renderDiff(change.old ?? "", change.new ?? ""), [change.old, change.new]);
+  const groups = useMemo(() => groupRows(renderDiff(change.old ?? "", change.new ?? "")), [change.old, change.new]);
   if (change.binary) return <p className="text-fg-muted text-xs px-3">Binary file, {change.status}.</p>;
-  return <div className="rdiff prose-pane text-[14px]">{rows.map((r, i) => <Row key={i} row={r} />)}</div>;
+  return (
+    <div className="rdiff prose-pane text-[14px]">
+      {groups.map((g, i) => g.kind === "row" ? <Row key={g.index} row={g.row} /> : <UnchangedRun key={`u${i}`} group={g} render={(r, idx) => <Row key={idx} row={r} />} />)}
+    </div>
+  );
 }
