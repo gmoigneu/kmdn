@@ -1,6 +1,6 @@
 // Render aligned blocks as HTML: rendered markdown per block, changed words highlighted.
 // Each row carries data-line-new so a comment on it maps to a PR line in the new file.
-import { marked } from "marked";
+import { renderMarkdown } from "../sanitize";
 import { Block, splitBlocks } from "./blocks";
 import { align, Op } from "./align";
 import { Seg, wordDiff, lineDiff } from "./wordDiff";
@@ -9,7 +9,7 @@ const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&l
 
 function renderBlock(b: Block): string {
   if (b.kind === "frontmatter") return `<pre class="fm">${esc(b.text)}</pre>`;
-  return marked.parse(b.text, { async: false, gfm: true }) as string;
+  return renderMarkdown(b.text);
 }
 
 // Highlight by inserting private-use markers into the markdown source, rendering, then swapping

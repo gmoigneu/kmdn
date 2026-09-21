@@ -35,7 +35,7 @@ export function DocumentView({ path }: { path: string }) {
       {edit.error && <p className="px-4 py-1 text-xs text-danger border-b border-border">{String(edit.error)}</p>}
       <div className="flex-1 flex min-h-0">
         <div className="flex-1 overflow-y-auto p-8">
-          {q.data != null && <RenderedMarkdown text={q.data} />}
+          {q.data != null && <RenderedMarkdown text={q.data} basePath={path} />}
         </div>
         {discuss && <DiscussionDrawer root={root} path={path} />}
       </div>
