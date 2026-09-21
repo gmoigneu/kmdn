@@ -13,6 +13,7 @@ const IMAGE_EXT: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "svg"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, rename = "FindingLevel"))]
 pub enum Level {
     Error,
     Warning,
@@ -20,6 +21,7 @@ pub enum Level {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, rename = "FindingKind"))]
 pub enum Kind {
     BrokenLink,
     InvalidFrontmatter,
@@ -31,6 +33,7 @@ pub enum Kind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Finding {
     pub level: Level,
     pub kind: Kind,

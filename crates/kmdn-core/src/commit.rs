@@ -29,6 +29,7 @@ pub fn allowed_set(globs: &[&str]) -> Result<GlobSet, globset::Error> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Author {
     pub name: String,
     pub email: String,

@@ -42,7 +42,8 @@ pub struct AppState {
     search: Arc<std::sync::Mutex<Option<SearchIndex>>>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct KbInfo {
     pub root: PathBuf,
     pub remote: Option<RemoteInfo>,
@@ -57,7 +58,8 @@ pub struct KbInfo {
     pub authenticated: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct SyncReport {
     pub main: FastForward,
     pub threads: Vec<(String, Result<RebaseOutcome, String>)>,
@@ -65,20 +67,23 @@ pub struct SyncReport {
     pub pushed: Vec<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct AuthStatus {
     pub hosts: Vec<StoredHost>,
     pub github_device_flow_available: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct StoredHost {
     pub host: String,
     pub login: String,
     pub kind: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct SubmitOutcome {
     pub submission: Option<Submission>,
     pub findings: Vec<kmdn_core::checks::Finding>,
@@ -506,7 +511,8 @@ async fn thread_changes(root: String, slug: String) -> Result<Vec<FileChange>, S
     .await
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct SubmitPreview {
     /// Deterministic title used when the author leaves the field empty (D26 fallback).
     pub default_title: String,
@@ -542,7 +548,8 @@ async fn submit_preview(
     .await
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct Suggestion {
     pub title: String,
     pub summary: String,
@@ -822,7 +829,8 @@ async fn move_local_changes_to_thread(
 
 // ---------- discussions (D13): one provider issue per document path
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct Discussion {
     pub issue: Option<provider::Issue>,
     pub comments: Vec<Comment>,
@@ -906,7 +914,8 @@ async fn list_reviews(
     .await
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct ReviewDetail {
     pub pull: PullRequest,
     pub changes: Vec<FileChange>,

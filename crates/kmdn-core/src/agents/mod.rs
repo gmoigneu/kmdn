@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum AgentKind {
     Claude,
     Codex,
@@ -37,6 +38,7 @@ impl AgentKind {
 /// Composer mode (D46). Suggest never writes. Edit writes markdown and assets. Developer adds shell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, rename = "AgentMode"))]
 pub enum Mode {
     Suggest,
     Edit,
@@ -45,6 +47,7 @@ pub enum Mode {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum ToolKind {
     Read,
     Write,
@@ -55,6 +58,7 @@ pub enum ToolKind {
 /// Normalized event stream every adapter produces.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum AgentEvent {
     SessionStarted {
         session_id: String,
@@ -92,6 +96,7 @@ pub enum AgentEvent {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "decision", rename_all = "snake_case")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum PermissionReply {
     Allow,
     Deny { reason: String },

@@ -11,6 +11,7 @@ use crate::repo::{Repo, RepoError};
 pub const BRANCH_PREFIX: &str = "kmdn/";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ThreadWorktree {
     pub slug: String,
     pub branch: String,

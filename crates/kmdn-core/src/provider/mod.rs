@@ -34,6 +34,7 @@ pub struct RepoRef {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct User {
     pub login: String,
     pub name: Option<String>,
@@ -43,6 +44,7 @@ pub struct User {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum PullState {
     Open,
     Closed,
@@ -50,6 +52,7 @@ pub enum PullState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct PullRequest {
     pub number: u64,
     pub title: String,
@@ -79,6 +82,7 @@ pub struct NewPull {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum MergeMethod {
     Merge,
     Squash,
@@ -86,6 +90,7 @@ pub enum MergeMethod {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Mergeability {
     pub mergeable: Option<bool>,
     /// Provider's own word: clean, blocked, behind, dirty, unstable, unknown.
@@ -97,12 +102,14 @@ pub struct Mergeability {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum Side {
     Left,
     Right,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Comment {
     pub id: u64,
     pub author: String,
@@ -117,6 +124,7 @@ pub struct Comment {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum ReviewEvent {
     Approve,
     RequestChanges,
@@ -124,6 +132,7 @@ pub enum ReviewEvent {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Issue {
     pub number: u64,
     pub title: String,
@@ -133,6 +142,7 @@ pub struct Issue {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct RepoSummary {
     pub owner: String,
     pub name: String,
@@ -219,6 +229,7 @@ pub fn touches_markdown(files: &[String]) -> bool {
 
 /// Device flow (D10). Returned by `start_device_flow` on the implementing module.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct DeviceCode {
     pub device_code: String,
     pub user_code: String,

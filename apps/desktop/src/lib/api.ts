@@ -1,143 +1,37 @@
-// Thin typed wrappers over Tauri commands. Types mirror kmdn-core until ts-rs generation lands (#20).
+// Thin typed wrappers over Tauri commands. Types come from the Rust structs via ts-rs
+// (scripts/gen-types.sh, #20); CI fails when apps/desktop/src/lib/generated drifts.
 import { invoke } from "@tauri-apps/api/core";
+import type {
+  AgentKind,
+  AgentMode,
+  AuthStatus,
+  Comment,
+  DetectedAgent,
+  DeviceCode,
+  Discussion,
+  Document,
+  Draft,
+  FileChange,
+  Finding,
+  KbInfo,
+  LocalChanges,
+  MergeMethod,
+  PullRequest,
+  RebaseOutcome,
+  RepoSummary,
+  ReviewDetail,
+  ReviewEvent,
+  SearchHit,
+  SessionInfo,
+  SubmitOutcome,
+  SubmitPreview,
+  Suggestion,
+  SyncReport,
+  ThreadWorktree,
+  User
+} from "./generated";
 
-export type ProviderKind =
-  | { kind: "git_hub" }
-  | { kind: "git_lab"; host: string }
-  | { kind: "unknown"; host: string };
-
-export interface RemoteInfo {
-  provider: ProviderKind;
-  host: string;
-  owner: string;
-  name: string;
-  https_url: string;
-  original_url: string;
-}
-
-export interface KbConfig {
-  name?: string | null;
-  description?: string | null;
-}
-
-export interface Author {
-  name: string;
-  email: string;
-}
-
-export interface KbInfo {
-  root: string;
-  remote: RemoteInfo | null;
-  default_branch: string;
-  head_branch: string | null;
-  dirty_paths: string[];
-  config: KbConfig;
-  user: Author;
-  login: string | null;
-  authenticated: boolean;
-}
-
-export interface StoredHost { host: string; login: string; kind: string }
-export interface AuthStatus { hosts: StoredHost[]; github_device_flow_available: boolean }
-export interface DeviceCode { device_code: string; user_code: string; verification_uri: string; expires_in: number; interval: number }
-export interface User { login: string; name: string | null; email: string | null; avatar_url: string | null }
-export interface RepoSummary { owner: string; name: string; full_name: string; private: boolean; default_branch: string; https_url: string; description: string | null }
-
-export type PullState = "open" | "closed" | "merged";
-export interface PullRequest {
-  number: number; title: string; body: string; author: string; head_branch: string; base_branch: string;
-  state: PullState; draft: boolean; url: string; updated_at: string; files: string[]; reviewers: string[];
-}
-export interface Comment { id: number; author: string; body: string; created_at: string; url: string; path: string | null; line: number | null; side: "left" | "right" | null }
-export interface Issue { number: number; title: string; body: string; url: string; open: boolean }
-export interface Discussion { issue: Issue | null; comments: Comment[] }
-export interface Submission { pull: PullRequest; created: boolean; pushed_head: string; log_comment: Comment | null }
-export interface SubmitPreview { default_title: string; agent_log: string | null; post_agent_log: boolean; labels: string[]; existing_pull: number | null }
-export interface SearchHit { path: string; title: string; snippet: string }
-export interface Draft { root: string; slug: string; path: string; text: string; updated_at: number }
-export interface SubmitOutcome { submission: Submission | null; findings: Finding[]; error: string | null }
-export interface Mergeability { mergeable: boolean | null; state: string; approvals: number; changes_requested: boolean; checks_passing: boolean | null }
-export interface ReviewDetail { pull: PullRequest; changes: FileChange[]; comments: Comment[]; mergeability: Mergeability; head_sha: string }
-export type ReviewEvent = "approve" | "request_changes" | "comment";
-export type MergeMethod = "merge" | "squash" | "rebase";
-
-export type AgentKind = "claude" | "codex" | "pi";
-export type AgentMode = "suggest" | "edit" | "developer";
-export type ToolKind = "read" | "write" | "shell" | { other: string };
-export type AgentEvent =
-  | { type: "session_started"; session_id: string }
-  | { type: "text_delta"; text: string }
-  | { type: "text"; text: string }
-  | { type: "tool_call_started"; id: string; kind: ToolKind; paths: string[]; command: string | null }
-  | { type: "tool_call_finished"; id: string; ok: boolean; summary: string }
-  | { type: "permission_request"; id: string; kind: ToolKind; paths: string[]; command: string | null }
-  | { type: "turn_done" }
-  | { type: "error"; message: string };
-export interface AgentEnvelope { slug: string; kind: AgentKind; event: AgentEvent }
-export interface DetectedAgent { kind: AgentKind; available: boolean; version: string | null; path: string | null }
-export interface SessionInfo { slug: string; kind: AgentKind; mode: AgentMode; session_id: string | null; running: boolean }
-
-export type Status = "draft" | "review" | "published" | "deprecated";
-
-export interface Document {
-  path: string;
-  title: string;
-  description: string | null;
-  status: Status | null;
-  order: number | null;
-  tags: string[];
-  owner: string | null;
-  frontmatter_error: string | null;
-}
-
-export interface ThreadWorktree {
-  slug: string;
-  branch: string;
-  path: string;
-  merged_at: number | null;
-}
-
-export interface Finding {
-  level: "error" | "warning";
-  kind: string;
-  path: string;
-  message: string;
-}
-
-export type ChangeStatus = "added" | "modified" | "deleted" | "renamed";
-
-export interface FileChange {
-  path: string;
-  old_path: string | null;
-  status: ChangeStatus;
-  old: string | null;
-  new: string | null;
-  binary: boolean;
-}
-
-export type FastForward = "UpToDate" | { Forwarded: { from: string; to: string } } | { Skipped: string };
-export type RebaseOutcome = "UpToDate" | { Rebased: { new_head: string } } | { Conflicts: ConflictFile[] };
-
-export interface ConflictFile {
-  path: string;
-  main: string | null;
-  thread: string | null;
-  base: string | null;
-}
-
-export interface SyncReport {
-  main: FastForward;
-  threads: [string, { Ok: RebaseOutcome } | { Err: string }][];
-  pushed: string[];
-}
-
-export interface LocalChanges {
-  head_branch: string | null;
-  on_default_branch: boolean;
-  dirty_paths: string[];
-  foreign_branch: string | null;
-  operation_in_progress: string | null;
-}
+export type * from "./generated";
 
 export const api = {
   openKb: (path: string) => invoke<KbInfo>("open_kb", { path }),
@@ -159,7 +53,7 @@ export const api = {
   resolveThreadConflicts: (root: string, slug: string, resolutions: Record<string, string>) =>
     invoke<RebaseOutcome>("resolve_thread_conflicts", { root, slug, resolutions }),
   submitPreview: (root: string, slug: string) => invoke<SubmitPreview>("submit_preview", { root, slug }),
-  submitSuggest: (root: string, slug: string, kind: AgentKind) => invoke<{ title: string; summary: string }>("submit_suggest", { root, slug, kind }),
+  submitSuggest: (root: string, slug: string, kind: AgentKind) => invoke<Suggestion>("submit_suggest", { root, slug, kind }),
   submitThread: (root: string, slug: string, title: string, summary: string | null, agentLog: string | null) =>
     invoke<SubmitOutcome>("submit_thread", { root, slug, title, summary, agentLog }),
   listReviews: (root: string) => invoke<PullRequest[]>("list_reviews", { root }),

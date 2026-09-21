@@ -11,6 +11,7 @@ use crate::repo::RepoError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum ChangeStatus {
     Added,
     Modified,
@@ -19,6 +20,7 @@ pub enum ChangeStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct FileChange {
     pub path: String,
     pub old_path: Option<String>,

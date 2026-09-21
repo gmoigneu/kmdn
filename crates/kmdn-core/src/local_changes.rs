@@ -8,6 +8,7 @@ use crate::repo::{Repo, RepoError};
 use crate::worktree::{ThreadWorktree, BRANCH_PREFIX};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct LocalChanges {
     pub head_branch: Option<String>,
     pub on_default_branch: bool,

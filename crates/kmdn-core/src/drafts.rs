@@ -13,6 +13,7 @@ pub enum DraftError {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Draft {
     pub root: String,
     pub slug: String,

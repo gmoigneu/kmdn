@@ -15,6 +15,7 @@ pub enum SearchError {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, rename = "SearchHit"))]
 pub struct Hit {
     pub path: String,
     pub title: String,
