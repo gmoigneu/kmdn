@@ -206,7 +206,7 @@ export function ThreadView({ slug, initialPath, initialMode, initialPrompt, init
       ) : (
       <div className="flex-1 flex min-h-0">
         <section className="w-[38%] min-w-[320px] border-r border-border flex flex-col">
-          <AgentPanel root={root} slug={slug} branch={t.branch} initialMode={initialMode} initialPrompt={initialPrompt} initialAgent={initialAgent} onChanged={() => { qc.invalidateQueries({ queryKey: ["changes", root, slug] }); qc.invalidateQueries({ queryKey: ["pending", root, slug] }); qc.invalidateQueries({ queryKey: ["wt-docs", t.path] }); qc.invalidateQueries({ queryKey: ["wt-file", t.path] }); }} />
+          <AgentPanel root={root} slug={slug} branch={t.branch} worktreePath={t.path} initialMode={initialMode} initialPrompt={initialPrompt} initialAgent={initialAgent} onChanged={() => { qc.invalidateQueries({ queryKey: ["changes", root, slug] }); qc.invalidateQueries({ queryKey: ["pending", root, slug] }); qc.invalidateQueries({ queryKey: ["wt-docs", t.path] }); qc.invalidateQueries({ queryKey: ["wt-file", t.path] }); }} />
         </section>
         <section className="flex-1 flex flex-col min-w-0">
           <div className="h-9 border-b border-border flex items-center px-2 gap-1 text-xs">
