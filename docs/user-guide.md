@@ -278,13 +278,33 @@ Also provider-dependent, so described in words. The **Reviews** section of the s
 
 ## Appearance
 
-kmdn follows the operating system's light or dark setting.
+Out of the box kmdn follows the operating system's light or dark setting. The **Appearance** dialog changes that, and more. Open it from the palette icon in the sidebar header, from the icon strip inside a thread, from the sign-in screen, or with the palette action **Appearance**. Everything in it is saved on this device only.
+
+![The Appearance dialog](screenshots/37-appearance.webp)
+
+**Themes.** System, Light, Dark, Catppuccin Latte, Frappé, Macchiato and Mocha, Nord, Gruvbox Dark, and Gruvbox Light. A theme recolours the whole app: chrome, sidebar, status pills, diff bars, the editor, and the syntax colours in code fences. Dark themes also switch native controls to dark.
+
+![Catppuccin Mocha in the editor](screenshots/38-theme-catppuccin-mocha.webp)
+
+![Nord on the Changes tab](screenshots/39-theme-nord.webp)
+
+![Gruvbox Light on Home](screenshots/40-theme-gruvbox-light.webp)
+
+**Fonts.** Three families: the interface, reading and editing (defaults to the interface font), and code. Each has presets (Inter, System, Serif, Humanist; JetBrains Mono, System, Fira Code, IBM Plex Mono) or takes a custom `font-family` list. Fonts have to be installed on the machine; kmdn does not download any.
+
+**Text size.** From 12 to 22 px for the reading and editing panes, with a live sample. The interface stays at 13 px.
+
+![Latte with a serif reading font at 17 px](screenshots/42-theme-latte-serif-editor.webp)
+
+**Notifications.** The three OS notifications (an agent needs approval, an agent finished while the window was unfocused, a new review appeared) each have a toggle here.
+
+**Reset** puts everything back to the defaults.
+
+The Read view, the diffs, and the editor share one set of spacing rules: room above headings, space between paragraphs and list items, padding around quotes, tables, and code blocks, so switching between Editor and Read does not move the text.
 
 ![Home in dark mode](screenshots/31-dark-home.webp)
 
 ![Changes in dark mode](screenshots/32-dark-thread.webp)
-
-![The editor in dark mode](screenshots/33-dark-editor.webp)
 
 ## Keyboard shortcuts
 
@@ -339,5 +359,4 @@ kmdn-cli init --name "Team handbook" --path /path/to/empty/folder
 - Renaming a thread, copying its branch, or opening its folder from the menu.
 - Developer mode in the agent picker, model pickers, `@document` mentions, and image attachments in the composer.
 - Review comments mirrored into the thread timeline, and agent assistance during review.
-- A settings screen. The app stores notification toggles per device but has no UI for them yet.
 - Windows and Linux packages. The build targets exist; I only exercised macOS for this guide.
