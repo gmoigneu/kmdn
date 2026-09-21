@@ -11,7 +11,7 @@ use kmdn_core::agents::{
     self, codex::CodexState, AgentEvent, AgentKind, CondensedLog, Mode, PermissionReply, Policy,
     ToolKind,
 };
-use kmdn_core::commit::{allowed_set, DEFAULT_ALLOWED};
+use kmdn_core::commit::allowed_set;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -209,7 +209,7 @@ impl Runtime {
         // stdout pump
         let policy = Policy {
             mode,
-            allowed: allowed_set(DEFAULT_ALLOWED).map_err(|e| e.to_string())?,
+            allowed: allowed_set(agents::AGENT_ALLOWED).map_err(|e| e.to_string())?,
             worktree: worktree.to_path_buf(),
         };
         let s2 = session.clone();
