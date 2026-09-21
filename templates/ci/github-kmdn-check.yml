@@ -11,6 +11,6 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install kmdn-cli
         run: |
-          curl -sSL https://github.com/gmoigneu/kmdn/releases/latest/download/kmdn-cli-x86_64-unknown-linux-gnu.tar.gz | tar xz
+          curl -sSL https://github.com/kmdn-app/kmdn/releases/latest/download/kmdn-cli-x86_64-unknown-linux-gnu.tar.gz | tar xz
           sudo mv kmdn-cli /usr/local/bin/
       - run: kmdn-cli check
