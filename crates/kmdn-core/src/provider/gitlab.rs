@@ -317,18 +317,51 @@ impl Provider for GitLab {
             Err(e) => return Err(e),
         }
         // Marker notes cover instances without approvals and the request-changes event (D29).
+        // Anyone who can comment can post a marker, so the MR author's own notes are ignored
+        // and every other marker author must hold Developer access or above (review S6).
+        let mr_author = v
+            .get("author")
+            .map(|u| s(u, "username"))
+            .unwrap_or_default();
         let notes: Vec<Value> =
             self.all_pages(&format!("{}/notes?sort=asc", Self::mr_path(repo, number)))?;
         let mut marker_state: std::collections::HashMap<String, &str> = Default::default();
+        let mut access_cache: std::collections::HashMap<u64, bool> = Default::default();
         for n in &notes {
             let body = s(n, "body");
-            let user = n
-                .get("author")
-                .map(|u| s(u, "username"))
-                .unwrap_or_default();
+            let is_marker =
+                body.starts_with(MARKER_APPROVED) || body.starts_with(MARKER_CHANGES_REQUESTED);
+            if !is_marker {
+                continue;
+            }
+            let author = n.get("author").cloned().unwrap_or(Value::Null);
+            let user = s(&author, "username");
+            if user.is_empty() || user == mr_author {
+                continue;
+            }
+            let uid = author.get("id").and_then(Value::as_u64).unwrap_or(0);
+            let trusted = match access_cache.get(&uid) {
+                Some(t) => *t,
+                None => {
+                    let level = self
+                        .get::<Value>(&format!(
+                            "/projects/{}/members/all/{uid}",
+                            Self::project(repo)
+                        ))
+                        .ok()
+                        .and_then(|m| m.get("access_level").and_then(Value::as_u64))
+                        .unwrap_or(0);
+                    let t = level >= 30; // Developer
+                    access_cache.insert(uid, t);
+                    t
+                }
+            };
+            if !trusted {
+                continue;
+            }
             if body.starts_with(MARKER_APPROVED) {
                 marker_state.insert(user, "approved");
-            } else if body.starts_with(MARKER_CHANGES_REQUESTED) {
+            } else {
                 marker_state.insert(user, "changes");
             }
         }
@@ -658,7 +691,19 @@ mod tests {
             .with_body("{}")
             .create();
         let _notes = server.mock("GET", Matcher::Regex(format!(r"^{P}/merge_requests/4/notes.*")))
-            .with_body(r#"[{"id":1,"body":"<!-- kmdn:approved -->\nok","author":{"username":"bob"},"created_at":"a"},{"id":2,"body":"<!-- kmdn:changes-requested -->\nno","author":{"username":"carol"},"created_at":"b"}]"#).create();
+            .with_body(r#"[{"id":1,"body":"<!-- kmdn:approved -->\nok","author":{"username":"bob","id":2},"created_at":"a"},{"id":2,"body":"<!-- kmdn:changes-requested -->\nno","author":{"username":"carol","id":3},"created_at":"b"},{"id":3,"body":"<!-- kmdn:approved -->\nself","author":{"username":"a","id":1},"created_at":"c"},{"id":4,"body":"<!-- kmdn:approved -->\nguest","author":{"username":"dave","id":4},"created_at":"d"}]"#).create();
+        let _bob = server
+            .mock("GET", format!("{P}/members/all/2").as_str())
+            .with_body(r#"{"id":2,"access_level":30}"#)
+            .create();
+        let _carol = server
+            .mock("GET", format!("{P}/members/all/3").as_str())
+            .with_body(r#"{"id":3,"access_level":40}"#)
+            .create();
+        let _dave = server
+            .mock("GET", format!("{P}/members/all/4").as_str())
+            .with_body(r#"{"id":4,"access_level":10}"#)
+            .create();
         let gl = GitLab::with_api_url(&server.url(), "glpat");
         let m = gl.mergeability(&repo(), 4).unwrap();
         assert_eq!(
