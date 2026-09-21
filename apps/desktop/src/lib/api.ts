@@ -192,6 +192,8 @@ export const api = {
   agentCancel: (slug: string) => invoke<void>("agent_cancel", { slug }),
   agentStop: (slug: string) => invoke<void>("agent_stop", { slug }),
   agentSession: (slug: string) => invoke<SessionInfo | null>("agent_session", { slug }),
+  saveAsset: (root: string, slug: string, docPath: string, name: string, dataBase64: string) =>
+    invoke<string>("save_asset", { root, slug, docPath, name, dataBase64 }),
   draftSave: (root: string, slug: string, path: string, text: string) => invoke<void>("draft_save", { root, slug, path, text }),
   draftGet: (root: string, slug: string, path: string) => invoke<Draft | null>("draft_get", { root, slug, path }),
   draftClear: (root: string, slug: string, path: string) => invoke<void>("draft_clear", { root, slug, path }),

@@ -1209,6 +1209,63 @@ async fn search_docs(
     .await
 }
 
+/// Stores a pasted or dropped image next to the document (D18): `<doc dir>/assets/<doc-slug>/<hash>.<ext>`.
+/// Returns the relative link to put in the markdown.
+#[tauri::command]
+async fn save_asset(
+    state: State<'_, AppState>,
+    root: String,
+    slug: String,
+    doc_path: String,
+    name: String,
+    data_base64: String,
+) -> Result<String, String> {
+    let state = state.inner().clone();
+    blocking(move || {
+        use base64::Engine;
+        use sha2::Digest;
+        let repo = Repo::open(&root).map_err(err)?;
+        let wt = worktree_for(&repo, &slug)?;
+        inside(&wt.path, &doc_path)?;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(data_base64.trim())
+            .map_err(|_| "image data is not valid base64".to_string())?;
+        let cap = index::read_config(repo.root()).assets.max_bytes;
+        if bytes.len() as u64 > cap {
+            return Err(format!(
+                "image is {} bytes, over the {} byte cap in .kmdn/config.yaml",
+                bytes.len(),
+                cap
+            ));
+        }
+        let ext = Path::new(&name)
+            .extension()
+            .map(|e| e.to_string_lossy().to_ascii_lowercase())
+            .unwrap_or_else(|| "png".into());
+        if !["png", "jpg", "jpeg", "gif", "webp", "svg"].contains(&ext.as_str()) {
+            return Err(format!(
+                ".{ext} is not an image type kmdn stores (png, jpg, gif, webp, svg)"
+            ));
+        }
+        let hash = format!("{:x}", sha2::Sha256::digest(&bytes));
+        let doc = Path::new(&doc_path);
+        let doc_dir = doc.parent().unwrap_or(Path::new(""));
+        let doc_slug = kmdn_core::worktree::slugify(
+            &doc.file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default(),
+        );
+        let rel_dir = doc_dir.join("assets").join(&doc_slug);
+        let file = format!("{}.{ext}", &hash[..12]);
+        let full_dir = wt.path.join(&rel_dir);
+        std::fs::create_dir_all(&full_dir).map_err(err)?;
+        std::fs::write(full_dir.join(&file), &bytes).map_err(err)?;
+        let _ = state;
+        Ok(format!("assets/{doc_slug}/{file}"))
+    })
+    .await
+}
+
 // ---------- drafts (D27): unsaved editor text mirrored to local SQLite
 
 #[tauri::command]
@@ -1605,6 +1662,7 @@ pub fn run() {
             add_ci_check,
             reindex_kb,
             search_docs,
+            save_asset,
             draft_save,
             draft_get,
             draft_clear,

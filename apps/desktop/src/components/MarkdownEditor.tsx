@@ -13,6 +13,12 @@ interface Props {
   value: string;
   onChange: (next: string) => void;
   onSave?: () => void;
+  /** Pasted or dropped image: return the relative link to insert, or null to ignore. */
+  onImage?: (file: File) => Promise<string | null>;
+  /** Mod-Shift-L: open the link picker. */
+  onLinkPicker?: () => void;
+  /** Receives a function that inserts text at the cursor. */
+  registerInsert?: (insert: (text: string) => void) => void;
   className?: string;
 }
 
@@ -56,14 +62,36 @@ const theme = EditorView.theme({
   ".cm-lp-hr": { display: "block", borderTop: "1px solid var(--border)", margin: "0.5em 0" },
 });
 
-export function MarkdownEditor({ value, onChange, onSave, className }: Props) {
+export function MarkdownEditor({ value, onChange, onSave, onImage, onLinkPicker, registerInsert, className }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const saveCompartment = useRef(new Compartment());
   const onChangeRef = useRef(onChange);
   const onSaveRef = useRef(onSave);
+  const onImageRef = useRef(onImage);
+  const onLinkRef = useRef(onLinkPicker);
   onChangeRef.current = onChange;
   onSaveRef.current = onSave;
+  onImageRef.current = onImage;
+  onLinkRef.current = onLinkPicker;
+
+  const insertAtCursor = (v: EditorView, text: string) => {
+    const { from, to } = v.state.selection.main;
+    v.dispatch({ changes: { from, to, insert: text }, selection: { anchor: from + text.length } });
+    v.focus();
+  };
+
+  /** Images from the clipboard or a drop land in assets/ next to the document (D18). */
+  const handleFiles = async (v: EditorView, files: FileList | null | undefined): Promise<boolean> => {
+    if (!files || !onImageRef.current) return false;
+    const images = Array.from(files).filter((f) => f.type.startsWith("image/"));
+    if (images.length === 0) return false;
+    for (const f of images) {
+      const rel = await onImageRef.current(f);
+      if (rel) insertAtCursor(v, `![${f.name.replace(/\.[^.]+$/, "")}](${rel})\n`);
+    }
+    return true;
+  };
 
   useEffect(() => {
     if (!host.current) return;
@@ -75,8 +103,21 @@ export function MarkdownEditor({ value, onChange, onSave, className }: Props) {
           drawSelection(),
           highlightActiveLine(),
           EditorView.lineWrapping,
+          EditorView.domEventHandlers({
+            paste: (e, v) => {
+              const files = e.clipboardData?.files;
+              if (files && files.length > 0 && Array.from(files).some((f) => f.type.startsWith("image/"))) { e.preventDefault(); void handleFiles(v, files); return true; }
+              return false;
+            },
+            drop: (e, v) => {
+              const files = e.dataTransfer?.files;
+              if (files && files.length > 0 && Array.from(files).some((f) => f.type.startsWith("image/"))) { e.preventDefault(); void handleFiles(v, files); return true; }
+              return false;
+            },
+          }),
           keymap.of([
             { key: "Mod-s", run: () => { onSaveRef.current?.(); return true; } },
+            { key: "Mod-Shift-l", run: () => { onLinkRef.current?.(); return true; } },
             indentWithTab,
             ...defaultKeymap,
             ...historyKeymap,
@@ -92,6 +133,7 @@ export function MarkdownEditor({ value, onChange, onSave, className }: Props) {
       parent: host.current,
     });
     view.current = v;
+    registerInsert?.((text) => insertAtCursor(v, text));
     return () => { v.destroy(); view.current = null; };
     // Mount once per document; external value changes are pushed below.
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -33,6 +33,27 @@ pub struct KbConfig {
     pub description: Option<String>,
     #[serde(default)]
     pub review: ReviewConfig,
+    #[serde(default)]
+    pub assets: AssetsConfig,
+}
+
+/// `.kmdn/config.yaml` `assets:` section (D18).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AssetsConfig {
+    #[serde(default = "default_max_bytes")]
+    pub max_bytes: u64,
+}
+
+fn default_max_bytes() -> u64 {
+    5 * 1024 * 1024
+}
+
+impl Default for AssetsConfig {
+    fn default() -> Self {
+        Self {
+            max_bytes: default_max_bytes(),
+        }
+    }
 }
 
 /// `.kmdn/config.yaml` `review:` section (04-content-model.md).
