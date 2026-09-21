@@ -304,6 +304,7 @@ impl Runtime {
                     if matches!(ev, AgentEvent::TurnDone) {
                         let turn = std::mem::take(&mut *s2.turn_events.lock().unwrap());
                         s2.log.lock().unwrap().from_events(s2.kind, &turn);
+                        s2.persist_log();
                     }
                     emit(
                         &app2,
@@ -381,6 +382,7 @@ impl Runtime {
         // Logged only once the message can actually go out, so a prompt that never reached the
         // agent does not end up in the condensed log posted to the pull request.
         s.log.lock().unwrap().user(s.kind, text);
+        s.persist_log();
         s.append_transcript(&serde_json::json!({ "user": text }));
         s.write_line(&line).await
     }
@@ -419,12 +421,20 @@ impl Runtime {
         self.sessions.lock().unwrap().get(slug).map(|s| s.info())
     }
 
-    pub fn condensed_log(&self, slug: &str) -> Option<String> {
-        self.sessions
+    /// Live session log, or the persisted one from an earlier session.
+    pub fn condensed_log(&self, data_dir: &Path, slug: &str) -> Option<String> {
+        let live = self
+            .sessions
             .lock()
             .unwrap()
             .get(slug)
             .map(|s| s.log.lock().unwrap().render())
+            .filter(|l| !l.trim().is_empty());
+        live.or_else(|| {
+            std::fs::read_to_string(session_dir(data_dir, slug).join("log.md"))
+                .ok()
+                .filter(|l| !l.trim().is_empty())
+        })
     }
 
     fn get(&self, slug: &str) -> Result<Arc<Session>, String> {
@@ -478,6 +488,12 @@ impl Session {
         if let Ok(json) = serde_json::to_vec_pretty(p) {
             let _ = std::fs::write(&self.pending_file, json);
         }
+    }
+
+    /// The condensed log survives restarts so the submit preview can show it later (D58).
+    fn persist_log(&self) {
+        let rendered = self.log.lock().unwrap().render();
+        let _ = std::fs::write(self.pending_file.with_file_name("log.md"), rendered);
     }
 
     fn remember_request(&self, text: &str) {

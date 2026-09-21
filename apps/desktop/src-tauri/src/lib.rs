@@ -438,6 +438,38 @@ fn thread_changes(root: String, slug: String) -> Result<Vec<FileChange>, String>
     kmdn_core::diff::thread_changes(&wt.path, &base_ref(&repo)?).map_err(err)
 }
 
+#[derive(Serialize)]
+pub struct SubmitPreview {
+    /// Deterministic title used when the author leaves the field empty (D26 fallback).
+    pub default_title: String,
+    /// Condensed agent log for this thread, if an agent worked in it.
+    pub agent_log: Option<String>,
+    /// `.kmdn/config.yaml` review.post_agent_log
+    pub post_agent_log: bool,
+    pub labels: Vec<String>,
+    pub existing_pull: Option<u64>,
+}
+
+/// What the submit form shows before anything is pushed (D26, D58).
+#[tauri::command]
+fn submit_preview(
+    state: State<AppState>,
+    root: String,
+    slug: String,
+) -> Result<SubmitPreview, String> {
+    let repo = Repo::open(&root).map_err(err)?;
+    let wt = worktree_for(&repo, &slug)?;
+    let changes = kmdn_core::diff::thread_changes(&wt.path, &base_ref(&repo)?).map_err(err)?;
+    let config = index::read_config(repo.root());
+    Ok(SubmitPreview {
+        default_title: submit::default_title(&changes, &wt.path),
+        agent_log: state.agents.condensed_log(&state.data_dir, &slug),
+        post_agent_log: config.review.post_agent_log,
+        labels: config.review.labels,
+        existing_pull: None,
+    })
+}
+
 #[tauri::command]
 async fn submit_thread(
     state: State<'_, AppState>,
@@ -445,14 +477,13 @@ async fn submit_thread(
     slug: String,
     title: String,
     summary: Option<String>,
+    agent_log: Option<String>,
 ) -> Result<SubmitOutcome, String> {
     let secrets = state.secrets.clone();
     let data_dir = state.data_dir.clone();
     let agents_rt = state.agents.clone();
-    let agent_log = state
-        .agents
-        .condensed_log(&slug)
-        .filter(|l| !l.trim().is_empty());
+    // The author saw and possibly edited the log in the submit form; None means do not post (D58).
+    let agent_log = agent_log.filter(|l| !l.trim().is_empty());
     blocking(move || {
         let st = AppState {
             secrets,
@@ -469,7 +500,7 @@ async fn submit_thread(
             summary,
             agent_log,
         };
-        let labels = vec!["kmdn".to_string()];
+        let labels = index::read_config(repo.root()).review.labels;
         match submit::submit(
             &repo,
             &wt,
@@ -1160,6 +1191,7 @@ pub fn run() {
             abandon_thread,
             save_document,
             thread_changes,
+            submit_preview,
             submit_thread,
             sync_now,
             local_changes,
