@@ -31,6 +31,7 @@ use tauri::{Manager, State};
 /// Public client id for the GitHub App device flow (D30). Empty means PAT only.
 const GITHUB_CLIENT_ID: Option<&str> = option_env!("KMDN_GITHUB_CLIENT_ID");
 
+#[derive(Clone)]
 pub struct AppState {
     secrets: Arc<FileStore>,
     data_dir: PathBuf,
@@ -272,8 +273,9 @@ fn kb_info(state: &AppState, path: &str) -> Result<KbInfo, String> {
 // ---------- knowledge base
 
 #[tauri::command]
-fn open_kb(state: State<AppState>, path: String) -> Result<KbInfo, String> {
-    kb_info(&state, &path)
+async fn open_kb(state: State<'_, AppState>, path: String) -> Result<KbInfo, String> {
+    let state = state.inner().clone();
+    blocking(move || kb_info(&state, &path)).await
 }
 
 #[tauri::command]
@@ -339,115 +341,144 @@ async fn create_kb(
 }
 
 #[tauri::command]
-fn list_documents(root: String) -> Vec<Document> {
-    index::scan(Path::new(&root))
+async fn list_documents(root: String) -> Result<Vec<Document>, String> {
+    blocking(move || Ok(index::scan(Path::new(&root)))).await
 }
 
 #[tauri::command]
-fn read_document(root: String, path: String) -> Result<String, String> {
-    let full = inside(Path::new(&root), &path)?;
-    std::fs::read_to_string(full).map_err(err)
+async fn read_document(root: String, path: String) -> Result<String, String> {
+    blocking(move || {
+        let full = inside(Path::new(&root), &path)?;
+        std::fs::read_to_string(full).map_err(err)
+    })
+    .await
 }
 
 #[tauri::command]
-fn run_checks(root: String) -> Vec<kmdn_core::checks::Finding> {
-    kmdn_core::checks::run(
-        Path::new(&root),
-        &kmdn_core::checks::Options_::default_cap(),
-    )
+async fn run_checks(root: String) -> Result<Vec<kmdn_core::checks::Finding>, String> {
+    blocking(move || {
+        Ok(kmdn_core::checks::run(
+            Path::new(&root),
+            &kmdn_core::checks::Options_::default_cap(),
+        ))
+    })
+    .await
 }
 
 // ---------- threads
 
 #[tauri::command]
-fn list_threads(root: String) -> Result<Vec<ThreadWorktree>, String> {
-    Repo::open(&root)
-        .map_err(err)?
-        .list_thread_worktrees()
-        .map_err(err)
+async fn list_threads(root: String) -> Result<Vec<ThreadWorktree>, String> {
+    blocking(move || {
+        Repo::open(&root)
+            .map_err(err)?
+            .list_thread_worktrees()
+            .map_err(err)
+    })
+    .await
 }
 
 #[tauri::command]
-fn create_thread(
-    state: State<AppState>,
+async fn create_thread(
+    state: State<'_, AppState>,
     root: String,
     slug: String,
 ) -> Result<ThreadWorktree, String> {
-    let repo = Repo::open(&root).map_err(err)?;
-    let base = base_ref(&repo)?;
-    let user = author_for(&repo, &state).name;
-    repo.create_thread_worktree(&user, &slug, &base)
-        .map_err(err)
+    let state = state.inner().clone();
+    blocking(move || {
+        let repo = Repo::open(&root).map_err(err)?;
+        let base = base_ref(&repo)?;
+        let user = author_for(&repo, &state).name;
+        repo.create_thread_worktree(&user, &slug, &base)
+            .map_err(err)
+    })
+    .await
 }
 
 #[tauri::command]
-fn abandon_thread(state: State<AppState>, root: String, slug: String) -> Result<(), String> {
-    Repo::open(&root)
-        .map_err(err)?
-        .remove_thread_worktree(&slug, true)
-        .map_err(err)?;
-    if let Ok(d) = state.drafts.lock() {
-        for dr in d.list(&root, &slug).unwrap_or_default() {
-            let _ = d.delete(&root, &slug, &dr.path);
+async fn abandon_thread(
+    state: State<'_, AppState>,
+    root: String,
+    slug: String,
+) -> Result<(), String> {
+    let state = state.inner().clone();
+    blocking(move || {
+        Repo::open(&root)
+            .map_err(err)?
+            .remove_thread_worktree(&slug, true)
+            .map_err(err)?;
+        if let Ok(d) = state.drafts.lock() {
+            for dr in d.list(&root, &slug).unwrap_or_default() {
+                let _ = d.delete(&root, &slug, &dr.path);
+            }
         }
-    }
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 /// Writes the file inside the thread's worktree and commits it (D27).
 #[tauri::command]
-fn save_document(
-    state: State<AppState>,
+async fn save_document(
+    state: State<'_, AppState>,
     root: String,
     slug: String,
     path: String,
     content: String,
 ) -> Result<Option<String>, String> {
-    let repo = Repo::open(&root).map_err(err)?;
-    let wt = worktree_for(&repo, &slug)?;
-    let full = inside(&wt.path, &path)?;
-    let allowed = allowed_set(DEFAULT_ALLOWED).map_err(err)?;
-    if !allowed.is_match(&path)
-        || path.eq_ignore_ascii_case(index::AGENTS_FILE)
-        || path.to_ascii_lowercase().starts_with(".kmdn/")
-    {
-        return Err(format!(
-            "{path}: only markdown documents and assets can be saved here"
-        ));
-    }
-    if let Some(parent) = full.parent() {
-        std::fs::create_dir_all(parent).map_err(err)?;
-    }
-    std::fs::write(&full, content).map_err(err)?;
-    let title = Path::new(&path)
-        .file_stem()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or(path.clone());
-    let allowed = allowed_set(DEFAULT_ALLOWED).map_err(err)?;
-    // Agent edits stay out of the human's commits until accepted (D15).
-    let pending: std::collections::HashSet<String> = agents::read_pending(&state.data_dir, &slug)
-        .paths
-        .into_iter()
-        .collect();
-    let oid = commit_allowed_except(
-        &wt.path,
-        &format!("Update {title}"),
-        &author_for(&repo, &state),
-        &allowed,
-        &pending,
-    )
-    .map_err(err)?;
-    if let Ok(d) = state.drafts.lock() {
-        let _ = d.delete(&root, &slug, &path);
-    }
-    Ok(oid.map(|o| o.to_string()))
+    let state = state.inner().clone();
+    blocking(move || {
+        let repo = Repo::open(&root).map_err(err)?;
+        let wt = worktree_for(&repo, &slug)?;
+        let full = inside(&wt.path, &path)?;
+        let allowed = allowed_set(DEFAULT_ALLOWED).map_err(err)?;
+        if !allowed.is_match(&path)
+            || path.eq_ignore_ascii_case(index::AGENTS_FILE)
+            || path.to_ascii_lowercase().starts_with(".kmdn/")
+        {
+            return Err(format!(
+                "{path}: only markdown documents and assets can be saved here"
+            ));
+        }
+        if let Some(parent) = full.parent() {
+            std::fs::create_dir_all(parent).map_err(err)?;
+        }
+        std::fs::write(&full, content).map_err(err)?;
+        let title = Path::new(&path)
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or(path.clone());
+        let allowed = allowed_set(DEFAULT_ALLOWED).map_err(err)?;
+        // Agent edits stay out of the human's commits until accepted (D15).
+        let pending: std::collections::HashSet<String> =
+            agents::read_pending(&state.data_dir, &slug)
+                .paths
+                .into_iter()
+                .collect();
+        let oid = commit_allowed_except(
+            &wt.path,
+            &format!("Update {title}"),
+            &author_for(&repo, &state),
+            &allowed,
+            &pending,
+        )
+        .map_err(err)?;
+        if let Ok(d) = state.drafts.lock() {
+            let _ = d.delete(&root, &slug, &path);
+        }
+        Ok(oid.map(|o| o.to_string()))
+    })
+    .await
 }
 
 #[tauri::command]
-fn thread_changes(root: String, slug: String) -> Result<Vec<FileChange>, String> {
-    let repo = Repo::open(&root).map_err(err)?;
-    let wt = worktree_for(&repo, &slug)?;
-    kmdn_core::diff::thread_changes(&wt.path, &base_ref(&repo)?).map_err(err)
+async fn thread_changes(root: String, slug: String) -> Result<Vec<FileChange>, String> {
+    blocking(move || {
+        let repo = Repo::open(&root).map_err(err)?;
+        let wt = worktree_for(&repo, &slug)?;
+        kmdn_core::diff::thread_changes(&wt.path, &base_ref(&repo)?).map_err(err)
+    })
+    .await
 }
 
 #[derive(Serialize)]
@@ -464,22 +495,26 @@ pub struct SubmitPreview {
 
 /// What the submit form shows before anything is pushed (D26, D58).
 #[tauri::command]
-fn submit_preview(
-    state: State<AppState>,
+async fn submit_preview(
+    state: State<'_, AppState>,
     root: String,
     slug: String,
 ) -> Result<SubmitPreview, String> {
-    let repo = Repo::open(&root).map_err(err)?;
-    let wt = worktree_for(&repo, &slug)?;
-    let changes = kmdn_core::diff::thread_changes(&wt.path, &base_ref(&repo)?).map_err(err)?;
-    let config = index::read_config(repo.root());
-    Ok(SubmitPreview {
-        default_title: submit::default_title(&changes, &wt.path),
-        agent_log: state.agents.condensed_log(&state.data_dir, &slug),
-        post_agent_log: config.review.post_agent_log,
-        labels: config.review.labels,
-        existing_pull: None,
+    let state = state.inner().clone();
+    blocking(move || {
+        let repo = Repo::open(&root).map_err(err)?;
+        let wt = worktree_for(&repo, &slug)?;
+        let changes = kmdn_core::diff::thread_changes(&wt.path, &base_ref(&repo)?).map_err(err)?;
+        let config = index::read_config(repo.root());
+        Ok(SubmitPreview {
+            default_title: submit::default_title(&changes, &wt.path),
+            agent_log: state.agents.condensed_log(&state.data_dir, &slug),
+            post_agent_log: config.review.post_agent_log,
+            labels: config.review.labels,
+            existing_pull: None,
+        })
     })
+    .await
 }
 
 #[tauri::command]
@@ -491,19 +526,10 @@ async fn submit_thread(
     summary: Option<String>,
     agent_log: Option<String>,
 ) -> Result<SubmitOutcome, String> {
-    let secrets = state.secrets.clone();
-    let data_dir = state.data_dir.clone();
-    let agents_rt = state.agents.clone();
-    let drafts = state.drafts.clone();
+    let st = state.inner().clone();
     // The author saw and possibly edited the log in the submit form; None means do not post (D58).
     let agent_log = agent_log.filter(|l| !l.trim().is_empty());
     blocking(move || {
-        let st = AppState {
-            secrets,
-            data_dir,
-            agents: agents_rt,
-            drafts,
-        };
         let repo = Repo::open(&root).map_err(err)?;
         let wt = worktree_for(&repo, &slug)?;
         let remote = repo.remote_info("origin").map_err(err)?;
@@ -631,25 +657,28 @@ async fn sync_now(state: State<'_, AppState>, root: String) -> Result<SyncReport
 
 /// Registers a branch someone checked out in the main clone as a thread (D45). Never renames.
 #[tauri::command]
-fn adopt_branch(root: String, branch: String) -> Result<ThreadWorktree, String> {
-    let repo = Repo::open(&root).map_err(err)?;
-    let default = repo.default_branch().map_err(err)?;
-    // Put the main clone back on its default branch so the worktree can own the branch.
-    if repo.head_branch().map_err(err)?.as_deref() == Some(branch.as_str()) {
-        if repo.is_dirty().map_err(err)? {
-            return Err(
-                "the clone has uncommitted changes on that branch; commit or move them first"
-                    .into(),
-            );
+async fn adopt_branch(root: String, branch: String) -> Result<ThreadWorktree, String> {
+    blocking(move || {
+        let repo = Repo::open(&root).map_err(err)?;
+        let default = repo.default_branch().map_err(err)?;
+        // Put the main clone back on its default branch so the worktree can own the branch.
+        if repo.head_branch().map_err(err)?.as_deref() == Some(branch.as_str()) {
+            if repo.is_dirty().map_err(err)? {
+                return Err(
+                    "the clone has uncommitted changes on that branch; commit or move them first"
+                        .into(),
+                );
+            }
+            repo.git()
+                .set_head(&format!("refs/heads/{default}"))
+                .map_err(err)?;
+            repo.git()
+                .checkout_head(Some(git2_checkout_force().as_mut()))
+                .map_err(err)?;
         }
-        repo.git()
-            .set_head(&format!("refs/heads/{default}"))
-            .map_err(err)?;
-        repo.git()
-            .checkout_head(Some(git2_checkout_force().as_mut()))
-            .map_err(err)?;
-    }
-    local_changes::adopt_branch(&repo, &branch).map_err(err)
+        local_changes::adopt_branch(&repo, &branch).map_err(err)
+    })
+    .await
 }
 
 fn git2_checkout_force() -> Box<kmdn_core::git2::build::CheckoutBuilder<'static>> {
@@ -702,19 +731,23 @@ async fn thread_conflicts(
 }
 
 #[tauri::command]
-fn local_changes(root: String) -> Result<LocalChanges, String> {
-    local_changes::inspect(&Repo::open(&root).map_err(err)?).map_err(err)
+async fn local_changes(root: String) -> Result<LocalChanges, String> {
+    blocking(move || local_changes::inspect(&Repo::open(&root).map_err(err)?).map_err(err)).await
 }
 
 #[tauri::command]
-fn move_local_changes_to_thread(
-    state: State<AppState>,
+async fn move_local_changes_to_thread(
+    state: State<'_, AppState>,
     root: String,
     slug: String,
 ) -> Result<ThreadWorktree, String> {
-    let repo = Repo::open(&root).map_err(err)?;
-    let user = author_for(&repo, &state).name;
-    local_changes::move_to_new_thread(&repo, &user, &slug).map_err(err)
+    let state = state.inner().clone();
+    blocking(move || {
+        let repo = Repo::open(&root).map_err(err)?;
+        let user = author_for(&repo, &state).name;
+        local_changes::move_to_new_thread(&repo, &user, &slug).map_err(err)
+    })
+    .await
 }
 
 // ---------- discussions (D13): one provider issue per document path
@@ -983,75 +1016,87 @@ fn agent_session(state: State<AppState>, slug: String) -> Option<agents::Session
 
 /// Agent edits waiting for review, limited to paths that still differ from the base.
 #[tauri::command]
-fn agent_pending(
-    state: State<AppState>,
+async fn agent_pending(
+    state: State<'_, AppState>,
     root: String,
     slug: String,
 ) -> Result<Vec<String>, String> {
-    let repo = Repo::open(&root).map_err(err)?;
-    let wt = worktree_for(&repo, &slug)?;
-    let p = agents::read_pending(&state.data_dir, &slug);
-    if p.paths.is_empty() {
-        return Ok(vec![]);
-    }
-    let changed: std::collections::HashSet<String> =
-        kmdn_core::diff::thread_changes(&wt.path, &base_ref(&repo)?)
-            .map_err(err)?
+    let state = state.inner().clone();
+    blocking(move || {
+        let repo = Repo::open(&root).map_err(err)?;
+        let wt = worktree_for(&repo, &slug)?;
+        let p = agents::read_pending(&state.data_dir, &slug);
+        if p.paths.is_empty() {
+            return Ok(vec![]);
+        }
+        let changed: std::collections::HashSet<String> =
+            kmdn_core::diff::thread_changes(&wt.path, &base_ref(&repo)?)
+                .map_err(err)?
+                .into_iter()
+                .map(|c| c.path)
+                .collect();
+        Ok(p.paths
             .into_iter()
-            .map(|c| c.path)
-            .collect();
-    Ok(p.paths
-        .into_iter()
-        .filter(|x| changed.contains(x))
-        .collect())
+            .filter(|x| changed.contains(x))
+            .collect())
+    })
+    .await
 }
 
 /// Commits accepted agent edits as `Agent (<name>): <request>` with the agent as co-author.
 #[tauri::command]
-fn agent_accept(
-    state: State<AppState>,
+async fn agent_accept(
+    state: State<'_, AppState>,
     root: String,
     slug: String,
     paths: Vec<String>,
 ) -> Result<Option<String>, String> {
-    let repo = Repo::open(&root).map_err(err)?;
-    let wt = worktree_for(&repo, &slug)?;
-    let p = agents::read_pending(&state.data_dir, &slug);
-    let label = p.agent.map(|a| a.label()).unwrap_or("agent");
-    let request = if p.request.trim().is_empty() {
-        "edits".to_string()
-    } else {
-        p.request.chars().take(60).collect::<String>()
-    };
-    let trailer = format!("Co-Authored-By: {label} <agent@kmdn.local>");
-    let oid = commit_paths(
-        &wt.path,
-        &format!("Agent ({label}): {request}"),
-        &author_for(&repo, &state),
-        &paths,
-        &[trailer],
-    )
-    .map_err(err)?;
-    agents::clear_pending(&state.data_dir, &slug, &paths);
-    Ok(oid.map(|o| o.to_string()))
+    let state = state.inner().clone();
+    blocking(move || {
+        let repo = Repo::open(&root).map_err(err)?;
+        let wt = worktree_for(&repo, &slug)?;
+        let p = agents::read_pending(&state.data_dir, &slug);
+        let label = p.agent.map(|a| a.label()).unwrap_or("agent");
+        let request = if p.request.trim().is_empty() {
+            "edits".to_string()
+        } else {
+            p.request.chars().take(60).collect::<String>()
+        };
+        let trailer = format!("Co-Authored-By: {label} <agent@kmdn.local>");
+        let oid = commit_paths(
+            &wt.path,
+            &format!("Agent ({label}): {request}"),
+            &author_for(&repo, &state),
+            &paths,
+            &[trailer],
+        )
+        .map_err(err)?;
+        agents::clear_pending(&state.data_dir, &slug, &paths);
+        Ok(oid.map(|o| o.to_string()))
+    })
+    .await
 }
 
 /// Restores the files to their last committed content and forgets the pending edits.
 #[tauri::command]
-fn agent_revert(
-    state: State<AppState>,
+async fn agent_revert(
+    state: State<'_, AppState>,
     root: String,
     slug: String,
     paths: Vec<String>,
 ) -> Result<(), String> {
-    let repo = Repo::open(&root).map_err(err)?;
-    let wt = worktree_for(&repo, &slug)?;
-    for p in &paths {
-        inside(&wt.path, p)?;
-    }
-    revert_paths(&wt.path, &paths).map_err(err)?;
-    agents::clear_pending(&state.data_dir, &slug, &paths);
-    Ok(())
+    let state = state.inner().clone();
+    blocking(move || {
+        let repo = Repo::open(&root).map_err(err)?;
+        let wt = worktree_for(&repo, &slug)?;
+        for p in &paths {
+            inside(&wt.path, p)?;
+        }
+        revert_paths(&wt.path, &paths).map_err(err)?;
+        agents::clear_pending(&state.data_dir, &slug, &paths);
+        Ok(())
+    })
+    .await
 }
 
 // ---------- drafts (D27): unsaved editor text mirrored to local SQLite
