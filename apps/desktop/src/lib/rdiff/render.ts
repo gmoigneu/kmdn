@@ -69,3 +69,29 @@ export function toHtml(rows: RenderedRow[]): string {
     `<div class="row ${r.type}" data-line-new="${r.lineNew ?? ""}" data-line-old="${r.lineOld ?? ""}"><div class="old">${r.old ?? ""}</div><div class="new">${r.new ?? ""}</div></div>`
   ).join("")}</div>`;
 }
+
+
+/** Groups consecutive unchanged rows so the UI can collapse them (review P1, D44). */
+export type RowGroup = { kind: "row"; row: RenderedRow; index: number } | { kind: "unchanged"; rows: RenderedRow[]; start: number };
+
+export function groupRows(rows: RenderedRow[], keepAround = 1): RowGroup[] {
+  const out: RowGroup[] = [];
+  let i = 0;
+  while (i < rows.length) {
+    if (rows[i].type !== "equal") { out.push({ kind: "row", row: rows[i], index: i }); i++; continue; }
+    let j = i;
+    while (j < rows.length && rows[j].type === "equal") j++;
+    const run = rows.slice(i, j);
+    // Keep a little context next to changes; collapse the rest when the run is long.
+    const head = i === 0 ? 0 : keepAround, tail = j === rows.length ? 0 : keepAround;
+    if (run.length > head + tail + 2) {
+      for (let k = 0; k < head; k++) out.push({ kind: "row", row: run[k], index: i + k });
+      out.push({ kind: "unchanged", rows: run.slice(head, run.length - tail), start: i + head });
+      for (let k = run.length - tail; k < run.length; k++) out.push({ kind: "row", row: run[k], index: i + k });
+    } else {
+      run.forEach((r, k) => out.push({ kind: "row", row: r, index: i + k }));
+    }
+    i = j;
+  }
+  return out;
+}
