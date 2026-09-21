@@ -517,6 +517,53 @@ async fn submit_preview(
     .await
 }
 
+#[derive(Serialize)]
+pub struct Suggestion {
+    pub title: String,
+    pub summary: String,
+}
+
+/// Asks an agent, read-only, for a PR title and summary from the thread's changes (D26).
+#[tauri::command]
+async fn submit_suggest(
+    state: State<'_, AppState>,
+    root: String,
+    slug: String,
+    kind: kmdn_core::agents::AgentKind,
+) -> Result<Suggestion, String> {
+    let st = state.inner().clone();
+    let (wt, diff) = {
+        let (root, slug) = (root.clone(), slug.clone());
+        blocking(move || {
+            let repo = Repo::open(&root).map_err(err)?;
+            let wt = worktree_for(&repo, &slug)?;
+            let changes =
+                kmdn_core::diff::thread_changes(&wt.path, &base_ref(&repo)?).map_err(err)?;
+            let mut diff = String::new();
+            for c in changes.iter().filter(|c| c.path != index::AGENTS_FILE) {
+                diff.push_str(&format!("### {} ({:?})\n", c.path, c.status));
+                match (&c.old, &c.new) {
+                    (Some(o), Some(n)) => {
+                        diff.push_str("--- before\n");
+                        diff.push_str(&o.chars().take(2_000).collect::<String>());
+                        diff.push_str("\n--- after\n");
+                        diff.push_str(&n.chars().take(2_000).collect::<String>());
+                    }
+                    (None, Some(n)) => diff.push_str(&n.chars().take(3_000).collect::<String>()),
+                    (Some(_), None) => diff.push_str("(document removed)"),
+                    (None, None) => {}
+                }
+                diff.push_str("\n\n");
+            }
+            Ok((wt, diff))
+        })
+        .await?
+    };
+    let _ = st;
+    let (title, summary) = agents::suggest_draft(kind, &wt.path, &diff).await?;
+    Ok(Suggestion { title, summary })
+}
+
 #[tauri::command]
 async fn submit_thread(
     state: State<'_, AppState>,
@@ -1464,6 +1511,7 @@ pub fn run() {
             save_document,
             thread_changes,
             submit_preview,
+            submit_suggest,
             submit_thread,
             sync_now,
             local_changes,
