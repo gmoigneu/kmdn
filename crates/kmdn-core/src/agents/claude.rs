@@ -20,6 +20,10 @@ pub fn args(mode: Mode, worktree: &Path, resume: Option<&str>) -> Vec<String> {
         "--include-partial-messages".into(),
         "--permission-prompts".into(),
         "host".into(),
+        // Only the user's own settings: hooks, MCP servers, and permission rules committed to
+        // the knowledge base by a collaborator must not run on this machine (review S7).
+        "--setting-sources".into(),
+        "user".into(),
     ];
     a.push("--permission-mode".into());
     a.push(
