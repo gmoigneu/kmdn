@@ -19,5 +19,11 @@ export function diffTokens(a: string[], b: string[]): Seg[] {
   emit("del", a.slice(i).join("")); emit("ins", b.slice(j).join(""));
   return out;
 }
-export const wordDiff = (a: string, b: string) => diffTokens(tokenize(a), tokenize(b));
+/** Word diff for prose. Blocks too large for the token table fall back to a line diff (review P1). */
+export const WORD_CELL_LIMIT = 2_000_000;
+export const wordDiff = (a: string, b: string) => {
+  const ta = tokenize(a), tb = tokenize(b);
+  if (ta.length * tb.length > WORD_CELL_LIMIT) return lineDiff(a, b);
+  return diffTokens(ta, tb);
+};
 export const lineDiff = (a: string, b: string) => diffTokens(a.split(/(?<=\n)/), b.split(/(?<=\n)/));
