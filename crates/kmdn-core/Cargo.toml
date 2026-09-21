@@ -20,6 +20,7 @@ globset.workspace = true
 sha2.workspace = true
 reqwest.workspace = true
 url.workspace = true
+rusqlite.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
